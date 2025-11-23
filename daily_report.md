@@ -1,4 +1,4 @@
-# Daily Price Report (2025-11-22)
+# Daily Price Report (2025-11-23)
 
 ### 600519 (CN)
 - 贵州茅台 - 白酒龙头，中国高端消费品
@@ -180,7 +180,7 @@
 ### AAPL (US)
 - 苹果公司 - 美股科技巨头，消费电子龙头
 - Price: 271.49
-- Change: 2.11%
+- Change: 2.08%
 
 ### TSLA (US)
 - 特斯拉 - 新能源汽车及能源解决方案领导企业
@@ -190,7 +190,7 @@
 ### AMZN (US)
 - 亚马逊 - 全球电商及云计算巨头
 - Price: 220.69
-- Change: 1.99%
+- Change: 2.01%
 
 ### NVDA (US)
 - 英伟达 - GPU及人工智能硬件龙头
@@ -200,17 +200,17 @@
 ### MSFT (US)
 - 微软 - 云计算及软件巨头
 - Price: 472.12
-- Change: -1.31%
+- Change: -1.33%
 
 ### AMD (US)
 - 超威半导体 - CPU/GPU芯片创新企业
 - Price: 203.78
-- Change: -2.42%
+- Change: -2.41%
 
 ### GOOG (US)
 - 谷歌 - 搜索引擎及AI技术巨头
 - Price: 299.65
-- Change: 0.79%
+- Change: 0.94%
 
 ### CME (US)
 - 芝商所 - 金融衍生品交易龙头
@@ -220,12 +220,12 @@
 ### IBIT (US)
 - Interactive Brokers - 在线经纪及交易平台
 - Price: 47.97
-- Change: 1.02%
+- Change: 1.01%
 
 ### COIN (US)
 - Coinbase - 加密货币交易平台
 - Price: 240.41
-- Change: -1.38%
+- Change: -1.44%
 
 ### VOO (US)
 - 标普500指数ETF
@@ -239,6 +239,6 @@
 
 ### BTC-USD (CRYPTO)
 - 比特币 - 主流数字货币
-- Price: 84571.1
-- Change: -0.59%
+- Price: 86003.69
+- Change: 1.56%
 
