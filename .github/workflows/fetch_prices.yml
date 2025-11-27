@@ -1,38 +1,27 @@
-name: Fetch Prices Daily
+name: Stock Alerts
 
 on:
-  workflow_dispatch:   # 手动触发
+  workflow_dispatch:      # 手动运行
   schedule:
-    - cron: "0 1 * * *"   # 每天北京时间 09:00（GitHub 用 UTC）
+    - cron: "0 */1 * * *"  # 每小时运行一次
 
 jobs:
-  fetch:
+  run:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - name: Setup Python
+        uses: actions/setup-python@v3
         with:
           python-version: "3.10"
 
       - name: Install dependencies
-        run: |
-          pip install yfinance pandas
+        run: pip install yfinance pandas openai requests
 
-      - name: Run price fetcher
+      - name: Run alert system
+        env:
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
         run: python fetch_prices.py
-
-      - name: Commit result
-        run: |
-          git config --global user.email "actions@github.com"
-          git config --global user.name "GitHub Actions"
-          git add daily_report.md
-          git commit -m "Daily price report" || echo "No changes to commit"
-
-      - name: Push changes
-        uses: ad-m/github-push-action@v0.8.0
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
