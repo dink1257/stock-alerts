@@ -1,70 +1,115 @@
-import pandas as pd
 import yfinance as yf
-from datetime import datetime
+import pandas as pd
+import os
+from openai import OpenAI
+from news import fetch_news
 
-# Load watchlist
-df = pd.read_csv("watchlist.csv")
+# ========== AI 初始化 ==========
+client = OpenAI(
+    api_key=os.getenv("DASHSCOPE_API_KEY"),
+    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
+)
 
-# Convert symbol for Yahoo Finance
-def convert_symbol(symbol, market):
-    if market == "CN":
-        return symbol + ".SS"
-    elif market == "HK":
-        return symbol + ".HK"
-    elif market == "US":
-        return symbol
-    elif market == "CRYPTO":
-        return symbol  # Already like BTC-USD
-    return symbol
+FLASH_MODEL = "qwen-turbo"     # 轻量便宜模型
+PLUS_MODEL = "qwen-plus"       # 高质量模型
 
-df["yf_symbol"] = df.apply(lambda x: convert_symbol(x["symbol"], x["market"]), axis=1)
+RISK_KEYWORDS = [
+    "暴跌", "闪崩", "监管", "财务造假", "裁员", "破产",
+    "利润下滑", "业绩预警", "经营风险", "财报", "审查", "制裁"
+]
 
-# Fetch data
-results = []
+# ========== 核心：智能模型切换 ==========
+def choose_model(text):
+    if any(k in text for k in RISK_KEYWORDS):
+        return PLUS_MODEL
+    return FLASH_MODEL
 
-for _, row in df.iterrows():
-    symbol = row["yf_symbol"]
-    raw = yf.Ticker(symbol).history(period="1d")
 
-    if raw.empty:
-        price = None
-        change = None
+def ai_analyze(news_list, symbol, remark):
+    """
+    使用 AI 对新闻做中文风险摘要（自动模型切换）
+    """
+    if not news_list:
+        return "未找到相关新闻。"
+
+    news_text = "\n".join([f"- {n['title']}" for n in news_list])
+
+    model = choose_model(news_text)
+
+    prompt = f"""
+你是一个专业投资分析助手。现在给你股票的描述与相关新闻标题。
+股票：{symbol}
+备注：{remark}
+新闻：
+{news_text}
+
+请用中文总结风险和机遇，只保留最关键3~5点。
+"""
+
+    resp = client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": prompt}]
+    )
+
+    return resp.choices[0].message.content
+
+
+def fetch_price(symbol, market):
+    """
+    获取股价
+    """
+    if market == "HK":
+        yf_symbol = symbol + ".HK"
+    elif market == "CN":
+        yf_symbol = symbol + ".SS"
     else:
-        price = round(raw["Close"].iloc[-1], 2)
-        prev_close = raw["Open"].iloc[-1]
-        change = round((price - prev_close) / prev_close * 100, 2)
+        yf_symbol = symbol
 
-    results.append({
-        "symbol": row["symbol"],
-        "market": row["market"],
-        "remark": row["remark"],
-        "price": price,
-        "change_%": change,
-        "alert_up": row["alert_up"],
-        "alert_down": row["alert_down"]
-    })
+    data = yf.Ticker(yf_symbol).history(period="1d")
 
-out = pd.DataFrame(results)
+    if data.empty:
+        return None
 
-# Generate markdown report
-today = datetime.now().strftime("%Y-%m-%d")
-md = f"# Daily Price Report ({today})\n\n"
+    price = float(data["Close"][-1])
+    change = float(data["Close"][-1] - data["Open"][-1])
+    pct = (change / data["Open"][-1]) * 100
 
-for _, r in out.iterrows():
-    md += f"### {r['symbol']} ({r['market']})\n"
-    md += f"- {r['remark']}\n"
-    md += f"- Price: {r['price']}\n"
-    md += f"- Change: {r['change_%']}%\n"
+    return price, pct
 
-    if r["change_%"] is not None:
-        if r["change_%"] >= r["alert_up"]:
-            md += f"  🚀 **上涨预警：涨幅超过 {r['alert_up']}%**\n"
-        if r["change_%"] <= -r["alert_down"]:
-            md += f"  ⚠️ **下跌预警：跌幅超过 {r['alert_down']}%**\n"
 
-    md += "\n"
+# ========== 主程序 ==========
+def main():
+    df = pd.read_csv("data/watchlist.csv")
 
-with open("daily_report.md", "w", encoding="utf-8") as f:
-    f.write(md)
+    for _, row in df.iterrows():
+        symbol = row["symbol"]
+        market = row["market"]
+        remark = row["remark"]
 
-print("Report generated: daily_report.md")
+        price_data = fetch_price(symbol, market)
+        if not price_data:
+            print(f"{symbol} 数据获取失败")
+            continue
+
+        price, pct = price_data
+
+        print("\n=====================================")
+        print(f"{symbol} - {remark}")
+        print(f"价格：{price:.2f}  涨跌：{pct:.2f}%")
+
+        # 抓新闻
+        news_list = fetch_news(remark.split(" - ")[0])
+
+        # AI 分析新闻
+        analysis = ai_analyze(news_list, symbol, remark)
+
+        print("【AI 风险摘要】")
+        print(analysis)
+
+
+if __name__ == "__main__":
+    main()
+
+
+
+ 
