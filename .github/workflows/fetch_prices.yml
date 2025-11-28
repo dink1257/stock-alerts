@@ -1,27 +1,28 @@
 name: Stock Alerts
 
 on:
-  workflow_dispatch:      # 手动运行
+  workflow_dispatch:
   schedule:
-    - cron: "0 */1 * * *"  # 每小时运行一次
+    - cron: "0 */1 * * 1-5"
 
 jobs:
-  run:
+  stock_alerts:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
 
-      - name: Setup Python
-        uses: actions/setup-python@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
           python-version: "3.10"
 
       - name: Install dependencies
-        run: pip install yfinance pandas openai requests
+        run: pip install yahooquery requests dashscope
 
-      - name: Run alert system
+      - name: Run price monitor
         env:
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+          BARK_URL: ${{ secrets.BARK_URL }}
         run: python fetch_prices.py
