@@ -1,113 +1,122 @@
-import requests
-from yahooquery import Ticker
-import csv
+import json
 import os
-import time
-import dashscope
+import requests
+import sys
+from datetime import datetime
 
-dashscope.api_key = os.getenv("DASHSCOPE_API_KEY")
-BARK_URL = os.getenv("BARK_URL")
+DATA_PATH = "tickers.json"
 
 
-# ---------------------------
-#  Bark 推送
-# ---------------------------
-def bark_push(title, body):
-    if not BARK_URL:
-        print("BARK_URL not set")
-        return
-    url = f"{BARK_URL}/{title}/{body}"
+def load_tickers():
+    """从 tickers.json 读取标的信息，并进行基础校验。"""
+    if not os.path.exists(DATA_PATH):
+        print(f"[ERROR] 找不到 {DATA_PATH}")
+        sys.exit(1)
+
     try:
-        requests.get(url, timeout=5)
-    except:
-        pass
+        with open(DATA_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        print(f"[ERROR] tickers.json 读取失败: {e}")
+        sys.exit(1)
+
+    if "tickers" not in data or not isinstance(data["tickers"], list):
+        print("[ERROR] tickers.json 格式错误：缺少 tickers 列表")
+        sys.exit(1)
+
+    return data["tickers"]
 
 
-# ---------------------------
-#  免费新闻源（简版）
-# ---------------------------
-def fetch_free_news(symbol):
-    url = f"https://query1.finance.yahoo.com/v1/finance/search?q={symbol}"
+def fetch_price_yf(symbol):
+    """调用 Yahoo Finance API 读取股价."""
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d"
     try:
-        r = requests.get(url, timeout=5).json()
-        if "news" in r:
-            items = r["news"]
-            if items:
-                return items[0].get("title", "（新闻标题获取失败）")
-    except:
+        resp = requests.get(url, timeout=10)
+        resp.raise_for_status()
+        j = resp.json()
+
+        result = j.get("chart", {}).get("result")
+        if not result:
+            return None
+
+        meta = result[0]["meta"]
+        price = meta.get("regularMarketPrice")
+        prev = meta.get("chartPreviousClose")
+
+        if price is None or prev is None:
+            return None
+
+        return price, prev
+    except Exception:
         return None
-    return None
 
 
-# ---------------------------
-#  通义 AI 分析
-# ---------------------------
-def ai_analyze(text, high_risk=False):
-    model = "qwen-plus" if high_risk else "qwen-turbo"
+def push_bark(msg):
+    """推送到 Bark。BARK_URL 存在 GitHub Secrets."""
+    bark_url = os.getenv("BARK_URL")
+    if not bark_url:
+        print("[WARN] 未设置 BARK_URL，跳过推送")
+        return
 
-    prompt = f"下面是股票相关新闻或市场情况，请用中文给我简短分析风险和原因：{text}"
-
-    response = dashscope.Generation.call(
-        model=model,
-        prompt=prompt
-    )
-
-    return response["output"]["text"]
+    try:
+        url = f"{bark_url}/{msg}"
+        requests.get(url)
+    except Exception as e:
+        print(f"[WARN] Bark 推送失败：{e}")
 
 
-# ---------------------------
-#  主逻辑：价格检查
-# ---------------------------
-def check_prices():
-    with open("data/watchlist.csv", "r", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            symbol = row["symbol"]
-            market = row["market"]
-            alert_up = float(row["alert_up"])
-            alert_down = float(row["alert_down"])
+def process_one(ticker):
+    """单个标的的处理逻辑：请求、比较、生成输出。"""
 
-            # yahooquery 代码
-            y_symbol = symbol
-            if market == "HK":
-                y_symbol = symbol + ".HK"
-            elif market == "CN":
-                y_symbol = symbol + ".SS"
+    symbol = ticker["symbol"]
+    name = ticker.get("name", symbol)
 
-            t = Ticker(y_symbol)
-            info = t.price
+    result = fetch_price_yf(symbol)
+    if result is None:
+        print(f"[FAILED] {symbol} 读取失败")
+        return None
 
-            if y_symbol not in info:
-                print(f"无法获取 {y_symbol} 数据")
-                continue
+    price, prev = result
+    change = price - prev
+    pct = (change / prev) * 100 if prev != 0 else 0
 
-            price = info[y_symbol].get("regularMarketPrice")
-            change_pct = info[y_symbol].get("regularMarketChangePercent")
+    return {
+        "symbol": symbol,
+        "name": name,
+        "price": round(price, 2),
+        "prev_close": round(prev, 2),
+        "change": round(change, 2),
+        "pct": round(pct, 2),
+    }
 
-            if change_pct is None:
-                continue
 
-            # 触发阈值？
-            if abs(change_pct) >= alert_up:
-                direction = "上涨" if change_pct > 0 else "下跌"
+def main():
+    tickers = load_tickers()
+    print(f"[INFO] 本次共需要更新 {len(tickers)} 个标的…")
 
-                # 1）抓新闻
-                news = fetch_free_news(symbol)
+    reports = []
+    for t in tickers:
+        r = process_one(t)
+        if r:
+            reports.append(r)
 
-                # 判断是否高风险
-                high_risk = direction == "下跌" and abs(change_pct) >= alert_down
+    if not reports:
+        print("[ERROR] 没有任何成功的数据，终止。")
+        return
 
-                # 2）AI 分析
-                ai_result = ai_analyze(news if news else "没有新闻", high_risk=high_risk)
+    # 输出表格到 console（GitHub Actions 日志）
+    print("\n=== Price Report ===")
+    for r in reports:
+        print(
+            f"{r['name']} ({r['symbol']}): {r['price']} | "
+            f"Prev {r['prev_close']} | {r['change']} ({r['pct']}%)"
+        )
 
-                # 3）推送
-                title = f"{symbol} 异动：{direction} {change_pct:.2f}%"
-                body = f"{news or '无相关新闻'} | AI解读：{ai_result}"
-
-                bark_push(title, body)
-                print(title)
-                print(body)
+    # 推送 Bark 汇总
+    ts = datetime.now().strftime("%H:%M")
+    summary = f"更新 {len(reports)} 个标的成功 ({ts})"
+    push_bark(summary)
 
 
 if __name__ == "__main__":
-    check_prices()
+    main()
