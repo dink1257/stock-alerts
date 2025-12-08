@@ -11,7 +11,7 @@ jobs:
       - name: 🔔 Test Bark Notification
         run: |
           # 🚨 步骤 1：请将 aBcDeFgHiJkLmNoP 替换为您自己的实际 Key
-          BARK_KEY=aBcDeFgHiJkLmNoP 
+          BARK_KEY=JpZk6p9CDw4NPjxjUu5WnW
           
           # 步骤 2：构造完整的 URL
           FULL_URL="https://api.day.app/${BARK_KEY}/GitHub Action Test/Push successful!"
