@@ -1,15 +1,21 @@
 - name: 🔔 Test Bark Notification
         run: |
-          BARK_KEY=<https://api.day.app/JpZk6p9CDw4NPjxjUu5WnW>
+          # 1. 直接赋值，避免 Shell 自动添加引号
+          BARK_KEY=<19691487765>
           
-          # ❗ 新增：打印出完整的 URL，供您检查
+          # 2. 构造完整的 URL
           FULL_URL="https://api.day.app/${BARK_KEY}/GitHub Action Test/Push successful!"
+          
+          # 3. 打印 URL 供检查 (关键调试步骤)
           echo "Debug URL: $FULL_URL" 
           
-          # 执行 cURL
+          # 4. 执行 cURL
+          # 注意：URL 变量用双引号包裹，以防 Key 中有特殊字符
           curl -f "$FULL_URL" 
           
+          # 检查 cURL 退出状态
           if [ $? -ne 0 ]; then
-            echo "--- Bark 推送失败！---"
+            echo "--- Bark 推送失败！请检查 Debug URL 是否正确！---"
             exit 1 
           fi
+          echo "Bark 推送命令执行成功。"
