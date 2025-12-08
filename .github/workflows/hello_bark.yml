@@ -13,7 +13,7 @@ jobs:
       - name: 🔔 Test Bark Notification
         run: |
           # 🚨 请在这里替换您的 Bark Key
-          BARK_KEY="<https://api.day.app/JpZk6p9CDw4NPjxjUu5WnW>"
+          BARK_KEY=<https://api.day.app/JpZk6p9CDw4NPjxjUu5WnW>
           
           # 使用 cURL 发送一个简单的通知
           curl -s "https://api.day.app/${BARK_KEY}/GitHub Action Test/Push successful!"
