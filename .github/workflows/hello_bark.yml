@@ -5,6 +5,8 @@ on:
 
 jobs:
   test-bark:
+    # 只在 dev/refactor 分支运行
+    if: github.ref == 'refs/heads/dev/refactor'
     runs-on: ubuntu-latest
     steps:
       - name: Bark 推送测试
