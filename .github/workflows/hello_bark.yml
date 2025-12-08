@@ -1,27 +1,15 @@
-name: 🚀 Hello Bark Test
-
-# 触发器：配置为手动运行，以便您随时测试
-on:
-  workflow_dispatch:
-
-jobs:
-  test_bark_push:
-    # 关键：不使用任何 if 条件，确保任务不会被跳过
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: 🔔 Test Bark Notification
+- name: 🔔 Test Bark Notification
         run: |
-          # 🚨 请在这里替换您的 Bark Key
           BARK_KEY=<https://api.day.app/JpZk6p9CDw4NPjxjUu5WnW>
           
-          # 使用 cURL 发送一个简单的通知
-          curl -s "https://api.day.app/${BARK_KEY}/GitHub Action Test/Push successful!"
+          # ❗ 新增：打印出完整的 URL，供您检查
+          FULL_URL="https://api.day.app/${BARK_KEY}/GitHub Action Test/Push successful!"
+          echo "Debug URL: $FULL_URL" 
           
-          # 检查 cURL 命令的退出状态
-          if [ $? -eq 0 ]; then
-            echo "Bark notification sent successfully."
-          else
-            echo "Failed to send Bark notification. (Check your Bark Key!)"
-            exit 1 # 如果推送失败，让整个步骤失败
+          # 执行 cURL
+          curl -f "$FULL_URL" 
+          
+          if [ $? -ne 0 ]; then
+            echo "--- Bark 推送失败！---"
+            exit 1 
           fi
