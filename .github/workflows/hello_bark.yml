@@ -1,16 +1,27 @@
-name: Hello Bark Test
+name: 🚀 Hello Bark Test
 
+# 触发器：配置为手动运行，以便您随时测试
 on:
-  workflow_dispatch:   # 手动触发
+  workflow_dispatch:
 
 jobs:
-  test-bark:
-    # 只在 dev/refactor 分支运行
-    if: github.ref == 'refs/heads/dev/refactor'
+  test_bark_push:
+    # 🚨 关键：不使用任何 if 条件，确保任务不会被跳过
     runs-on: ubuntu-latest
+    
     steps:
-      - name: Bark 推送测试
-        env:
-          BARK_URL: ${{ secrets.BARK_URL }}
+      - name: 🔔 Test Bark Notification
         run: |
-          curl -X GET "$BARK_URL/Hello%20Bark/这是一条测试推送"
+          # 🚨 替换您的 Bark Key
+          BARK_KEY="<YOUR_BARK_KEY>"
+          
+          # 使用 cURL 发送一个简单的通知
+          curl -s "https://api.day.app/${BARK_KEY}/GitHub Action Test/Push successful!"
+          
+          # 检查 cURL 命令的退出状态
+          if [ $? -eq 0 ]; then
+            echo "Bark notification sent successfully."
+          else
+            echo "Failed to send Bark notification."
+            exit 1 # 如果推送失败，让整个步骤失败
+          fi
