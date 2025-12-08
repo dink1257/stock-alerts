@@ -6,14 +6,14 @@ on:
 
 jobs:
   test_bark_push:
-    # 🚨 关键：不使用任何 if 条件，确保任务不会被跳过
+    # 关键：不使用任何 if 条件，确保任务不会被跳过
     runs-on: ubuntu-latest
     
     steps:
       - name: 🔔 Test Bark Notification
         run: |
-          # 🚨 替换您的 Bark Key
-          BARK_KEY="<https://api.day.app/JpZk6p9CDw4NPjxjUu5WnW/>"
+          # 🚨 请在这里替换您的 Bark Key
+          BARK_KEY="<https://api.day.app/JpZk6p9CDw4NPjxjUu5WnW>"
           
           # 使用 cURL 发送一个简单的通知
           curl -s "https://api.day.app/${BARK_KEY}/GitHub Action Test/Push successful!"
@@ -22,6 +22,6 @@ jobs:
           if [ $? -eq 0 ]; then
             echo "Bark notification sent successfully."
           else
-            echo "Failed to send Bark notification."
+            echo "Failed to send Bark notification. (Check your Bark Key!)"
             exit 1 # 如果推送失败，让整个步骤失败
           fi
