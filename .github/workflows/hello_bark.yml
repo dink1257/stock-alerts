@@ -1,7 +1,7 @@
 - name: 🔔 Test Bark Notification
         run: |
           # 1. 直接赋值，避免 Shell 自动添加引号
-          BARK_KEY=<19691487765>
+          BARK_KEY=<JpZk6p9CDw4NPjxjUu5WnW>
           
           # 2. 构造完整的 URL
           FULL_URL="https://api.day.app/${BARK_KEY}/GitHub Action Test/Push successful!"
