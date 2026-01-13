@@ -85,18 +85,22 @@ def check_prices():
                 continue
                 
             pct = ((price - prev) / prev * 100)
-            threshold = float(row.get("alert_up") or 2.0) # 默认 2% 阈值
+            
+            # --- 修正点：根据你的标准设为 3.0 ---
+            # 逻辑：优先读取 CSV 里的设定值，如果没有填，则默认按 3.0% 触发
+            threshold = float(row.get("alert_up") or 3.0) 
 
             if abs(pct) >= threshold:
-                print(f"[触发] {symbol} 波动 {pct:.2f}%，开始 AI 诊断...")
+                print(f"[触发] {symbol} 波动 {pct:.2f}% (阈值 {threshold}%)，开始 AI 诊断...")
                 news = fetch_top_news(symbol)
                 analysis = ai_quick_analyze(symbol, pct, news)
                 
-                title = f"🚨 {symbol} 异动 {pct:.2f}%"
+                direction = "🚀大涨" if pct > 0 else "📉大跌"
+                title = f"{direction}: {symbol} {pct:.2f}%"
                 content = f"当前价: {price}\n分析: {analysis}"
                 bark_push(title, content)
             else:
-                print(f"[正常] {symbol} 波动 {pct:.2f}%，未达阈值")
+                print(f"[正常] {symbol} 波动 {pct:.2f}%，未达 {threshold}% 阈值")
         except Exception as e:
             print(f"[报错] 处理 {symbol} 时出错: {e}")
 
