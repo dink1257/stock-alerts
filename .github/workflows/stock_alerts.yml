@@ -1,19 +1,16 @@
-name: Real-Time Alerts
-on:
-  schedule:
-    - cron: "*/5 * * * 1-5" # 交易日每5分钟
-  workflow_dispatch:
-jobs:
-  run_monitor:
-    runs-on: ubuntu-latest
+# 在 stock_alerts.yml 的最后增加这些步骤
+    permissions:
+      contents: write # 必须赋予写权限，否则无法记录预警等级
+
     steps:
       - uses: actions/checkout@v4
         with:
           ref: dev/refactor
-      - name: Run
-        env:
-          BARK_URL: ${{ secrets.BARK_URL }}
-          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+      # ... 原有的 pip install 和 python run ...
+      - name: Save Alert State
         run: |
-          pip install yahooquery requests pytz
-          python fetch_prices.py
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add data/alert_state.json || true
+          git commit -m "Update alert levels [skip ci]" || true
+          git push
