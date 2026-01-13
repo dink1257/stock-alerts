@@ -74,6 +74,7 @@ def main():
     us_now = now_utc.astimezone(pytz.timezone("US/Eastern"))
     
     action = "IDLE"
+    action = "SUMMARY"
     # 判断 A 股 (周一至周五)
     if cn_now.weekday() < 5:
         hm = cn_now.hour * 100 + cn_now.minute
