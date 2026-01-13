@@ -101,7 +101,7 @@ def main():
         all_news = []
         for s in stocks: all_news.extend(fetch_top_news(s).split(" | "))
         report = ai_analyze("", 0, "\n".join(list(set(all_news))), mode="SUMMARY")
-        if report: bark_push("☕ 盘前自选股动态汇总", report)
+        if report: bark_push("☕ 盘前自选股动态汇总（新版测试）", report)
 
     elif action == "MONITOR":
         print("扫描股价异动...")
