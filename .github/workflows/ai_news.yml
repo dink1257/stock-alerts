@@ -1,28 +1,20 @@
-name: Stock News & AI Analysis
-
+name: Pre-Market Summary
 on:
   schedule:
-    - cron: "*/10 * * * *"   # 每 10 分钟运行一次
-  workflow_dispatch:          # 可以手动触发
+    - cron: "0 1 * * 1-5"   # 北京时间 09:00 (A股盘前)
+    - cron: "0 13 * * 1-5"  # 北京时间 21:00 (美股盘前)
+  workflow_dispatch:
 jobs:
-  analyze:
+  run_summary:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
         with:
-          python-version: '3.10'
-
-      - name: Install dependencies
-        run: |
-          pip install pandas requests dashscope
-
-      - name: Run AI news analysis
+          ref: dev/refactor
+      - name: Run
         env:
+          BARK_URL: ${{ secrets.BARK_URL }}
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
         run: |
+          pip install requests
           python news.py
