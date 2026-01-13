@@ -1,0 +1,30 @@
+name: AI_Stock_Master
+on:
+  schedule:
+    - cron: "*/5 * * * *" # 全天候每5分钟探测一次，逻辑由Python内部控制
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  run_all:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Run
+        env:
+          BARK_URL: ${{ secrets.BARK_URL }}
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+        run: |
+          pip install requests yahooquery pytz
+          python main_scheduler.py
+      - name: Sync
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add data/alert_state.json || true
+          git commit -m "Update state [skip ci]" || true
+          git push || true
