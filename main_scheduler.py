@@ -117,7 +117,7 @@ def main():
                 if level > state["alerts"].get(s, 0):
                     news = fetch_top_news(s)
                     analysis = ai_analyze(s, pct, news, mode="MONITOR")
-                    title = f"{'🔥' if level==2 else '🔔'} {s} {'涨' if pct>0 else '跌'}{abs_pct:.2f}%"
+                    title = f"{'🔥' if level==2 else '🔔'} {s} {'涨' if pct>0 else '跌'}{abs_pct:.2f}%（新版测试）"
                     bark_push(title, f"价格:{price}\n逻辑:\n{analysis}")
                     state["alerts"][s] = level
             except: continue
