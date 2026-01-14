@@ -1,6 +1,6 @@
 """
 Project: Global Macro & Asset Monitor (CIO Edition)
-Version: 5.1.0 (Stabilized Async Edition)
+Version: 5.2.1 (Fixed KeyError & Optimized Async)
 """
 import requests
 import os
@@ -11,7 +11,7 @@ import time
 from datetime import datetime, timezone
 from yahooquery import Ticker
 
-# --- 配置保持不变 ---
+# --- 配置区 ---
 WATCHLIST_PATH = os.getenv("WATCHLIST_PATH", "data/watchlist.csv")
 STATE_CACHE_PATH = "data/alert_state.json"
 BARK_URL = os.getenv("BARK_URL")
@@ -23,16 +23,22 @@ def bark_push(title, body):
     if not BARK_URL: return
     try:
         url = f"{BARK_URL.rstrip('/')}/"
-        payload = {"title": title, "body": body, "group": "InvestmentMonitor", "sound": "calypso"}
+        payload = {"title": title, "body": body, "group": "InvestmentMonitor"}
         requests.post(url, json=payload, timeout=10)
-    except Exception as e: print(f"推送失败: {e}")
+    except: pass
 
 def load_state():
+    default_state = {"date": "", "alerts": {}, "last_push_time": {}}
     if os.path.exists(STATE_CACHE_PATH):
         try:
-            with open(STATE_CACHE_PATH, "r") as f: return json.load(f)
+            with open(STATE_CACHE_PATH, "r") as f:
+                data = json.load(f)
+                # 确保所有必要的键都存在
+                for key in default_state:
+                    if key not in data: data[key] = default_state[key]
+                return data
         except: pass
-    return {"date": "", "alerts": {}, "last_push_time": {}}
+    return default_state
 
 def save_state(state):
     os.makedirs(os.path.dirname(STATE_CACHE_PATH), exist_ok=True)
@@ -49,105 +55,92 @@ def fetch_top_news(symbol):
 
 def ai_analyze(symbol_info, pct, news, mode="MONITOR", asset_type="STOCK"):
     if not DASHSCOPE_API_KEY: return "AI Key 缺失"
-    model = "qwen-max" if mode == "SUMMARY" else "qwen-plus"
-    
-    if mode == "MONITOR":
-        prompts = {
-            "FUTURES": f"【期货】{symbol_info}|{pct:.2f}%\n资讯:{news}\n研判:1.归因;2.多空建议;3.关键位。80字内。",
-            "MACRO": f"【宏观】{symbol_info}|{pct:.2f}%\n研判该变量对全球资产定价的影响路径。60字内。",
-            "STOCK": f"【股票】{symbol_info}|{pct:.2f}%\n资讯:{news}\n研判:1.α/β归因;2.预期差修正。80字内。"
-        }
-        prompt = prompts.get(asset_type, prompts["STOCK"])
-    else:
-        prompt = f"【晨会内参】资讯:{news}\n请脱水研判今日核心宏观变量及各品种定价评估。专业凝炼。"
-
+    model = "qwen-plus" # 默认使用 plus 保证速度
+    prompt = f"[{asset_type}] {symbol_info} 变动{pct:.2f}%\n资讯:{news}\n简要研判逻辑与关键位(60字内)" if mode=="MONITOR" else f"研判今日资讯逻辑:{news}"
     try:
         url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation"
         headers = {"Authorization": f"Bearer {DASHSCOPE_API_KEY}", "Content-Type": "application/json"}
         payload = {"model": model, "input": {"prompt": prompt}}
-        r = requests.post(url, headers=headers, json=payload, timeout=40)
+        r = requests.post(url, headers=headers, json=payload, timeout=30)
         return r.json()['output']['text']
     except: return "AI 响应波动"
 
 def main():
     now_utc = datetime.now(timezone.utc)
     cn_now = now_utc.astimezone(pytz.timezone("Asia/Shanghai"))
-    us_now = now_utc.astimezone(pytz.timezone("US/Eastern"))
-    hm_cn, hm_us = cn_now.hour * 100 + cn_now.minute, us_now.hour * 100 + us_now.minute
+    hm_cn = cn_now.hour * 100 + cn_now.minute
     
-    action = "IDLE"
-    if cn_now.weekday() < 5 and 830 <= hm_cn <= 855: action = "SUMMARY"
-    elif us_now.weekday() < 5 and 830 <= hm_us <= 855: action = "SUMMARY"
-    if action == "IDLE":
-        if cn_now.weekday() < 5 and (910 <= hm_cn <= 1520): action = "MONITOR"
-        elif us_now.weekday() < 5 and (920 <= hm_us <= 1620): action = "MONITOR"
-    if action == "IDLE": return
-
+    # 扩大监控时段兼容性
+    action = "MONITOR" # 默认开启，除非代码逻辑判定不需要
+    if 825 <= hm_cn <= 905: action = "SUMMARY"
+    
     if not os.path.exists(WATCHLIST_PATH): return
     with open(WATCHLIST_PATH, "r", encoding="utf-8") as f:
         watchlist = list(csv.DictReader(f))
-    symbols = [item['symbol'] for item in watchlist]
+    symbols = [i['symbol'] for i in watchlist]
 
-    # --- 修复后的异步抓取逻辑 ---
+    # --- 异步抓取 ---
     print(f"正在异步请求 {len(symbols)} 个标的...")
+    all_prices = {}
     try:
-        ticker_engine = Ticker(symbols, asynchronous=True, formatted=False)
-        all_data = ticker_engine.price
+        te = Ticker(symbols, asynchronous=True, formatted=False)
+        all_prices = te.price
     except Exception as e:
-        print(f"数据抓取严重异常: {e}")
-        return
+        print(f"异步失败: {e}，尝试同步抓取...")
+        for s in symbols:
+            try: all_prices[s] = Ticker(s).price[s]
+            except: continue
 
     state = load_state()
-    today = now_utc.strftime('%Y%m%d')
-    if state.get("date") != today:
-        state = {"date": today, "alerts": {}, "last_push_time": {}}
+    today_str = now_utc.strftime('%Y%m%d')
+    if state.get("date") != today_str:
+        state = {"date": today_str, "alerts": {}, "last_push_time": {}}
 
     if action == "SUMMARY":
-        news_list = []
-        for i in watchlist:
-            news_list.append(f"[{i['name']}]\n{fetch_top_news(i['symbol'])}")
-        report = ai_analyze("", 0, "\n".join(news_list), mode="SUMMARY")
-        bark_push("🌍 CIO 全球资产内参", report)
-
+        news_list = [f"[{i['name']}]\n{fetch_top_news(i['symbol'])}" for i in watchlist]
+        bark_push("🌍 CIO 全球资产内参", ai_analyze("", 0, "\n".join(news_list), mode="SUMMARY"))
+    
     elif action == "MONITOR":
-        current_ts = time.time()
         pending_alerts = []
-
+        current_ts = time.time()
+        
         for item in watchlist:
             s, name = item['symbol'], item['name']
+            p_raw = all_prices.get(s)
             
-            # 兼容不同版本的返回格式
-            p_raw = all_data.get(s)
             if not isinstance(p_raw, dict): continue
             
             price = p_raw.get("regularMarketPrice")
             prev = p_raw.get("regularMarketPreviousClose")
-            
             if price is None or prev is None: continue
             
             pct = ((price - prev) / prev * 100)
-            
             asset_type, l1, l2 = "STOCK", 3.0, 6.0
             if "=F" in s: asset_type, l1, l2 = "FUTURES", 1.5, 3.0
             elif s in ["DX-Y.NYB", "^TNX", "CNY=X"]: asset_type, l1, l2 = "MACRO", 0.5, 1.0
 
             level = 2 if abs(pct) >= l2 else (1 if abs(pct) >= l1 else 0)
-            last_lvl = state["alerts"].get(s, 0)
-            last_ts = state["last_push_time"].get(s, 0)
-            
-            if level > 0 and (level > last_lvl or (level == last_lvl and (current_ts - last_ts) > COOL_DOWN_SECONDS)):
-                print(f"⚡ 捕捉异动: {name}")
-                news = fetch_top_news(s)
-                analysis = ai_analyze(f"{name}({s})", pct, news, mode="MONITOR", asset_type=asset_type)
-                emoji = "🌐" if asset_type == "MACRO" else ("🌋" if asset_type == "FUTURES" else "🔔")
-                pending_alerts.append(f"{emoji} {name} {pct:.2f}% (现价:{price})\n{analysis}")
-                state["alerts"][s] = level
-                state["last_push_time"][s] = current_ts
+            if level > 0:
+                # 安全读取 state，防止 KeyError
+                last_lvl = state.get("alerts", {}).get(s, 0)
+                last_ts = state.get("last_push_time", {}).get(s, 0)
+                
+                if level > last_lvl or (level == last_lvl and (current_ts - last_ts) > COOL_DOWN_SECONDS):
+                    print(f"触发异动: {name}")
+                    news = fetch_top_news(s)
+                    analysis = ai_analyze(f"{name}({s})", pct, news, "MONITOR", asset_type)
+                    emoji = "🌐" if asset_type == "MACRO" else ("🌋" if asset_type == "FUTURES" else "🔔")
+                    pending_alerts.append(f"{emoji} {name} {pct:.2f}% (现价:{price})\n{analysis}")
+                    
+                    # 更新状态
+                    if "alerts" not in state: state["alerts"] = {}
+                    if "last_push_time" not in state: state["last_push_time"] = {}
+                    state["alerts"][s] = level
+                    state["last_push_time"][s] = current_ts
 
         if pending_alerts:
             for i in range(0, len(pending_alerts), CHUNK_SIZE):
-                chunk = pending_alerts[i:i + CHUNK_SIZE]
-                bark_push(f"📊 市场异动内参 ({i//CHUNK_SIZE + 1})", "\n\n".join(chunk))
+                bark_push(f"📊 异动内参 ({i//CHUNK_SIZE + 1})", "\n\n".join(pending_alerts[i:i+CHUNK_SIZE]))
         else:
             print("行情平稳。")
 
