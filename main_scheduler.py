@@ -4,6 +4,7 @@ import csv
 import pytz
 import json
 import urllib.parse
+import time
 from datetime import datetime, timezone
 from yahooquery import Ticker
 
@@ -12,20 +13,28 @@ WATCHLIST_PATH = os.getenv("WATCHLIST_PATH", "data/watchlist.csv")
 STATE_CACHE_PATH = "data/alert_state.json"
 BARK_URL = os.getenv("BARK_URL")
 DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY")
+COOL_DOWN_SECONDS = 3600  # 冷却时间：1小时
+CHUNK_SIZE = 6           # 每批次推送的最大标的数量
 
 def bark_push(title, body):
     if not BARK_URL: return
     try:
-        url = f"{BARK_URL.rstrip('/')}/{urllib.parse.quote(str(title))}/{urllib.parse.quote(str(body))}"
-        requests.get(url, timeout=10)
-    except: pass
+        url = f"{BARK_URL.rstrip('/')}/"
+        payload = {
+            "title": title,
+            "body": body,
+            "group": "InvestmentMonitor",
+            "sound": "calypso"
+        }
+        requests.post(url, json=payload, timeout=15)
+    except Exception as e: print(f"推送失败: {e}")
 
 def load_state():
     if os.path.exists(STATE_CACHE_PATH):
         try:
             with open(STATE_CACHE_PATH, "r") as f: return json.load(f)
         except: return {}
-    return {}
+    return {"date": "", "alerts": {}, "last_push_time": {}}
 
 def save_state(state):
     os.makedirs(os.path.dirname(STATE_CACHE_PATH), exist_ok=True)
@@ -37,43 +46,22 @@ def fetch_top_news(symbol):
         url = f"https://query1.finance.yahoo.com/v1/finance/search?q={symbol}"
         r = requests.get(url, headers=headers, timeout=10)
         news = r.json().get("news", [])
-        return " | ".join([n['title'] for n in news[:5]]) if news else "暂无直接核心资讯"
-    except: return "资讯抓取链路异常"
+        return " | ".join([n['title'] for n in news[:5]]) if news else "暂无资讯"
+    except: return "资讯抓取异常"
 
-# --- AI 核心引擎 (CIO 级别 - 股/期双逻辑) ---
-def ai_analyze(symbol_info, pct, news, mode="MONITOR", is_futures=False):
+def ai_analyze(symbol_info, pct, news, mode="MONITOR", asset_type="STOCK"):
     if not DASHSCOPE_API_KEY: return "AI Key 缺失"
+    model = "qwen-max" if mode == "SUMMARY" else "qwen-plus"
     
     if mode == "MONITOR":
-        if is_futures:
-            # 【期货 CIO 逻辑】关注：供需边际、宏观定价、多空建议
-            prompt = (
-                f"【买方 CIO 期货深度研判】\n标的：{symbol_info} | 波动：{pct:.2f}%\n核心资讯：{news}\n\n"
-                "作为顶级对冲基金 CIO，请针对该期货合约给出专业研判（150字内）：\n"
-                "1. 归因：识别是地缘政治、宏观政策、库存数据还是期限结构（Back/Contango）驱动。\n"
-                "2. 判别：明确当前属于‘单边趋势’还是‘宽幅震荡’，给出[多/空/观望]方向建议。\n"
-                "3. 开仓指引：评估当前波动是否具备‘大级别周期’开仓价值，指出关键支撑/阻力逻辑。\n"
-                "4. 风险：提示当前最易导致止损的尾部风险变量。"
-            )
-        else:
-            # 【股票 CIO 逻辑】关注：α/β 归因、预期差
-            prompt = (
-                f"【买方 CIO 股票异动研判】\n标的：{symbol_info} | 波动：{pct:.2f}%\n资讯：{news}\n\n"
-                "要求(150字内)：\n1. 归因：界定是宏观β驱动还是个股α驱动。\n"
-                "2. 定价：分析此异动是否代表市场预期差的边际修正。\n"
-                "3. 纯度：剔除废话，若资讯弱相关，请直言‘资金博弈，无显著诱因’。"
-            )
-        model = "qwen-plus"
+        prompts = {
+            "FUTURES": f"【期货】{symbol_info}|{pct:.2f}%\n资讯:{news}\n研判:1.归因;2.多空建议;3.关键位。80字内。",
+            "MACRO": f"【宏观】{symbol_info}|{pct:.2f}%\n研判该变量对全球资产定价的影响路径。60字内。",
+            "STOCK": f"【股票】{symbol_info}|{pct:.2f}%\n资讯:{news}\n研判:1.α/β归因;2.预期差修正。80字内。"
+        }
+        prompt = prompts.get(asset_type, prompts["STOCK"])
     else:
-        # 【全品种盘前汇总】
-        prompt = (
-            f"【全球首席策略师 - 晨会内参】\n资讯池：{news}\n\n"
-            "任务：对 24H 资讯执行‘脱水’研判，输出高密度策略简报：\n"
-            "1. 全球驱动：识别影响今日股/期市场的宏观定价变量。\n"
-            "2. 归母定价：按品种分组，给出驱动因素与定价边际变化评估(看多/看空/中性)。\n"
-            "3. 机会预警：标注具备大级别趋势启动潜力的品种及理由。要求专业凝炼。"
-        )
-        model = "qwen-max"
+        prompt = f"【晨会内参】资讯:{news}\n请脱水研判今日核心宏观变量及各品种定价评估。专业凝炼。"
 
     try:
         url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation"
@@ -81,32 +69,25 @@ def ai_analyze(symbol_info, pct, news, mode="MONITOR", is_futures=False):
         payload = {"model": model, "input": {"prompt": prompt}}
         r = requests.post(url, headers=headers, json=payload, timeout=60)
         return r.json()['output']['text']
-    except Exception as e:
-        return f"【系统告警】AI 响应超时，请参考实时资讯: {str(e)}"
+    except: return "AI 响应波动"
 
-# --- 调度逻辑 ---
 def main():
     now_utc = datetime.now(timezone.utc)
-    cn_tz, us_tz = pytz.timezone("Asia/Shanghai"), pytz.timezone("US/Eastern")
-    cn_now, us_now = now_utc.astimezone(cn_tz), now_utc.astimezone(us_tz)
-    
-    print(f"--- 启动任务 [{cn_now.strftime('%Y-%m-%d %H:%M:%S')}] ---")
+    cn_now = now_utc.astimezone(pytz.timezone("Asia/Shanghai"))
+    us_now = now_utc.astimezone(pytz.timezone("US/Eastern"))
+    print(f"--- 启动 [{cn_now.strftime('%H:%M:%S')}] ---")
     
     action = "IDLE"
     hm_cn, hm_us = cn_now.hour * 100 + cn_now.minute, us_now.hour * 100 + us_now.minute
 
-    # 1. 自动适配期货交易（期货通常全天扫描，股票按开盘时间）
-    # 如果有期货需求，建议将 GitHub Actions 改为全天候执行
     if cn_now.weekday() < 5 and 830 <= hm_cn <= 845: action = "SUMMARY"
     elif us_now.weekday() < 5 and 830 <= hm_us <= 845: action = "SUMMARY"
     
     if action == "IDLE":
-        # 扩展：如果当前处于 A 股或美股交易时段，进入监控
-        if cn_now.weekday() < 5 and ((915 <= hm_cn <= 1510)): action = "MONITOR"
+        if cn_now.weekday() < 5 and (915 <= hm_cn <= 1510): action = "MONITOR"
         elif us_now.weekday() < 5 and (925 <= hm_us <= 1610): action = "MONITOR"
-        # 备注：如需 24 小时监控期货，可在 .yml 中将频率设为全天执行，此处 action 强制设为 MONITOR
 
-    print(f"当前动作决策: {action}")
+    if action == "IDLE": return
 
     if not os.path.exists(WATCHLIST_PATH): return
     with open(WATCHLIST_PATH, "r", encoding="utf-8") as f:
@@ -114,38 +95,63 @@ def main():
 
     state = load_state()
     today = datetime.now(timezone.utc).strftime('%Y%m%d')
-    if state.get("date") != today: state = {"date": today, "alerts": {}}
+    if state.get("date") != today:
+        state = {"date": today, "alerts": {}, "last_push_time": {}}
 
     if action == "SUMMARY":
         news_data = "\n".join([f"[{i['name']}({i['symbol']})]\n{fetch_top_news(i['symbol'])}" for i in watchlist])
         report = ai_analyze("", 0, news_data, mode="SUMMARY")
-        bark_push("🌍 CIO 全球市场深度内参", report)
+        bark_push("🌍 CIO 全球资产内参", report)
 
     elif action == "MONITOR":
+        current_ts = time.time()
+        pending_alerts = []
+
         for item in watchlist:
             s, name = item['symbol'], item['name']
-            is_futures = ("=F" in s or "FTX" in s) # 期货识别逻辑
+            asset_type, l1, l2 = "STOCK", 3.0, 6.0
+            if "=F" in s or "FTX" in s: asset_type, l1, l2 = "FUTURES", 1.5, 3.0
+            elif s in ["DX-Y.NYB", "^TNX", "CNY=X"]: asset_type, l1, l2 = "MACRO", 0.5, 1.0
+            elif "USD" in s: asset_type, l1, l2 = "FUTURES", 2.0, 5.0
+
             try:
                 t = Ticker(s)
                 p = t.price[s]
                 price, prev = p.get("regularMarketPrice"), p.get("regularMarketPreviousClose")
                 if not price or not prev: continue
-                
                 pct = ((price - prev) / prev * 100)
-                # 期货阈值通常设得比股票敏感（例如 1.5% 就算显著波动）
-                threshold_l1 = 1.5 if is_futures else 3.0
-                threshold_l2 = 3.0 if is_futures else 6.0
+                level = 2 if abs(pct) >= l2 else (1 if abs(pct) >= l1 else 0)
                 
-                level = 2 if abs(pct) >= threshold_l2 else (1 if abs(pct) >= threshold_l1 else 0)
-                
-                if level > state["alerts"].get(s, 0):
-                    print(f"检测到异动: {name} {pct:.2f}%")
-                    analysis = ai_analyze(f"{name}({s})", pct, fetch_top_news(s), mode="MONITOR", is_futures=is_futures)
-                    title = f"{'🌋' if is_futures else ('🔥' if level==2 else '🔔')} {name} {pct:.2f}%"
-                    bark_push(title, f"现价: {price}\n【CIO 研判】: {analysis}")
+                last_time = state["last_push_time"].get(s, 0)
+                is_cooled = (current_ts - last_time) > COOL_DOWN_SECONDS
+                is_level_up = level > state["alerts"].get(s, 0)
+
+                if level > 0 and (is_level_up or (level == state["alerts"].get(s, 0) and is_cooled)):
+                    print(f"分析异动: {name}")
+                    analysis = ai_analyze(f"{name}({s})", pct, fetch_top_news(s), mode="MONITOR", asset_type=asset_type)
+                    emoji = "🌐" if asset_type == "MACRO" else ("🌋" if asset_type == "FUTURES" else "🔔")
+                    pending_alerts.append(f"{emoji} {name} {pct:.2f}% (现价:{price})\n{analysis}")
+                    
                     state["alerts"][s] = level
+                    state["last_push_time"][s] = current_ts
             except: continue
-        save_state(state)
+        
+        # --- 分批推送逻辑 (每 6 条一组) ---
+        if pending_alerts:
+            total = len(pending_alerts)
+            for i in range(0, total, CHUNK_SIZE):
+                chunk = pending_alerts[i:i + CHUNK_SIZE]
+                batch_no = (i // CHUNK_SIZE) + 1
+                total_batches = (total + CHUNK_SIZE - 1) // CHUNK_SIZE
+                
+                title = f"📊 市场异动内参 ({batch_no}/{total_batches})"
+                body = "\n\n".join(chunk)
+                bark_push(title, body)
+                if total_batches > 1: time.sleep(1) # 多批次发送时稍作停顿，防止乱序
+            
+            print(f"共推送 {total} 条异动研判，分为 {total_batches} 批次。")
+
+    save_state(state)
 
 if __name__ == "__main__":
     main()
