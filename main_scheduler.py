@@ -74,8 +74,7 @@ def main():
     us_now = now_utc.astimezone(pytz.timezone("US/Eastern"))
     
     action = "IDLE"
-    action = "SUMMARY"
-    # 判断 A 股 (周一至周五)
+        # 判断 A 股 (周一至周五)
     if cn_now.weekday() < 5:
         hm = cn_now.hour * 100 + cn_now.minute
         if 830 <= hm <= 840: action = "SUMMARY"
@@ -102,7 +101,7 @@ def main():
         all_news = []
         for s in stocks: all_news.extend(fetch_top_news(s).split(" | "))
         report = ai_analyze("", 0, "\n".join(list(set(all_news))), mode="SUMMARY")
-        if report: bark_push("☕ 盘前自选股动态汇总（新版测试）", report)
+        if report: bark_push("☕ 盘前自选股动态汇总", report)
 
     elif action == "MONITOR":
         print("扫描股价异动...")
@@ -118,7 +117,7 @@ def main():
                 if level > state["alerts"].get(s, 0):
                     news = fetch_top_news(s)
                     analysis = ai_analyze(s, pct, news, mode="MONITOR")
-                    title = f"{'🔥' if level==2 else '🔔'} {s} {'涨' if pct>0 else '跌'}{abs_pct:.2f}%（新版测试）"
+                    title = f"{'🔥' if level==2 else '🔔'} {s} {'涨' if pct>0 else '跌'}{abs_pct:.2f}%"
                     bark_push(title, f"价格:{price}\n逻辑:\n{analysis}")
                     state["alerts"][s] = level
             except: continue
