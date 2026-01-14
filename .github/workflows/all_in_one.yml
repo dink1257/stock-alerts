@@ -1,4 +1,4 @@
-name: AI_Stock_Master
+name: AI_Stock_Master_V2
 
 on:
   schedule:
