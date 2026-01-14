@@ -1,46 +1,52 @@
-name: AI Stock Monitor Pipeline
+name: AI Stock Monitor Pipeline (Safety Max Efficiency)
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
-  workflow_dispatch:
+    # 1. 北京时间 09:30 - 15:59 (UTC 01:30 - 07:59) 每 6 分钟运行
+    - cron: "30/6 1-7 * * 1-5"
+    
+    # 2. 北京时间 16:00 - 23:59 (UTC 08:00 - 15:59) 每 20 分钟运行
+    - cron: "*/20 8-15 * * 1-5"
+    
+    # 3. 北京时间 04:00 (UTC 20:00) 美股收盘定调
+    - cron: "0 20 * * 1-5"
+    
+    # 4. 北京时间 08:30 (UTC 00:30) 盘前内参生成 (对应 main_scheduler 逻辑)
+    - cron: "30 0 * * 1-5"
+    
+  workflow_dispatch: # 保留手动测试按钮
 
 permissions:
   contents: write
 
 jobs:
   stock-analysis-service:
-    name: Market Analysis & AI Insight
     runs-on: ubuntu-latest
-    
     steps:
-      - name: 1. Checkout Source Code
+      - name: 1. Checkout Code
         uses: actions/checkout@v4
 
-      - name: 2. Setup Python Environment
+      - name: 2. Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+          cache: 'pip' # 必须启用缓存
 
-      - name: 3. Install Production Dependencies
-        run: |
-          pip install requests yahooquery pytz
+      - name: 3. Install Dependencies
+        run: pip install requests yahooquery pytz
 
-      - name: 4. Execute AI Intelligence Scheduler
+      - name: 4. Execute Engine
         env:
           BARK_URL: ${{ secrets.BARK_URL }}
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
           WATCHLIST_PATH: "data/watchlist.csv"
-        run: python main_scheduler.py
-
-      - name: 5. Synchronize Execution State
         run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "stock-ai-bot"
+          mkdir -p data
+          python main_scheduler.py
+
+      - name: 5. Sync State
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "bot"
           git add data/alert_state.json || true
-          if git diff --staged --quiet; then
-            echo "No state changes detected. Skipping commit."
-          else
-            git commit -m "chore: update market alert state [skip ci]"
-            git push
-          fi
+          git diff --staged --quiet || (git commit -m "chore: sync market state [skip ci]" && git push)
