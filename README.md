@@ -1,11 +1,13 @@
-# 🌍 Global Macro & Asset Monitor (CIO Edition) 
+# 🌍 Global Macro & Asset Monitor (CIO Edition)
+
 ### 全球全资产 CIO 智能监控实验室
 
+**Version:** 4.0.0 (High-Efficiency Asymmetric Edition)
 
+**Core Engine:** Alibaba Qwen-Max/Plus (DashScope)
 
-**Version:** 4.0.0 (Batching & Advanced Layout)  
-**Core Engine:** Alibaba Qwen-Max/Plus (DashScope)  
-**Delivery:** Bark Push (iOS/macOS)  
+**Delivery:** Bark Push (iOS/macOS)
+
 **License:** MIT
 
 ---
@@ -18,43 +20,75 @@ This is an AI-driven, professional-grade market monitoring system designed for *
 
 ---
 
-## ✨ Key Features / 核心功能
+## ✨ System Parameters / 系统参数说明
 
-### 1. Multi-Asset Coverage / 全球全资产覆盖
-* **Stocks / 股票**: A-Shares (CN) & US Stocks with $\alpha/\beta$ attribution analysis. (A股及美股异动分析)
-* **Futures / 期货**: Gold, Oil, Copper, and Index Futures with trend & inventory logic. (金/油/铜及股指期货趋势研判)
-* **Macro Anchors / 宏观锚点**: Dollar Index (DXY), US 10Y Yield (^TNX), Offshore RMB (CNY=X). (美元/美债/汇率定价锚点)
-* **Crypto / 数字资产**: Bitcoin (BTC) as a global risk-appetite indicator. (比特币等风险偏好风向标)
+### 1. Dynamic Thresholds / 分级预警阈值
 
-### 2. CIO-Level Intelligence / 投资总监级研判
-* **Strategic Direction / 多空判别**: Distinguishes between "Single-side trends" and "Wide fluctuations". (明确区分单边趋势与宽幅震荡)
-* **Opening Guidance / 开仓指引**: Evaluates whether current volatility possesses "large-cycle" entry value. (评估是否具备大级别周期开仓价值)
-* **Contextual Attribution / 深度归因**: Identifies drivers from macro policy, geopolitical events, or stock-specific fundamentals. (识别宏观政策、地缘或基本面驱动力)
+System logic adjusts sensitivity based on asset volatility profiles:
+系统根据资产属性自动切换预警灵敏度：
 
-### 3. Smart Delivery / 智能交付系统
-* **Dynamic Thresholds / 分级预警**: 
-    * 🌐 **Macro**: 0.5% (High sensitivity / 极度灵敏)
-    * 🌋 **Futures**: 1.5% (Trend trigger / 趋势启动)
-    * 🔔 **Stocks**: 3.0% (Noise filtering / 过滤杂音)
-* **Batch & Chunking / 分批汇总**: Automatically bundles alerts into groups of 6 to prevent notification fatigue. (每 6 条异动自动合并推送，拒绝信息轰炸)
-* **Cooldown Mechanism / 冷却机制**: 1-hour "silence" per asset per level to ensure focus. (标的 1 小时冷却逻辑，防止反复横跳干扰)
+* 🌐 **Macro (宏观锚点)**: **0.5%** *Covers DXY, US10Y, CNY/USD. High sensitivity to catch global liquidity shifts.* *(覆盖美元指数、美债收益率、人民币汇率。极高灵敏度捕捉流动性拐点。)*
+* 🌋 **Futures (期货/大宗)**: **1.5%** *Covers Gold, Crude Oil, Index Futures. Designed to catch trend start-up.* *(覆盖黄金、原油、股指期货。旨在捕捉趋势行情启动。)*
+* 🔔 **Stocks (股票异动)**: **3.0%** *Covers Global Equities. Filters out daily market noise.* *(覆盖全球个股。有效过滤日内杂波噪音。)*
+
+### 2. Monitoring Schedule / 运行调度 (UTC+8)
+
+Optimized for the 2,000-min free tier on GitHub Actions:
+针对 GitHub 每月 2,000 分钟免费额度优化的非对称调度：
+
+| Time Block (Beijing Time) | Frequency | Focus |
+| --- | --- | --- |
+| **09:30 - 16:00** | **Every 6 mins** | A-Shares & HK Market (火力全开) |
+| **16:00 - 24:00** | **Every 20 mins** | US Pre-market & Early Session (活跃时段) |
+| **00:00 - 09:30** | **2 Snapshots** | US Closing & Global Settlement (深夜静默) |
 
 ---
 
-## 🛠️ Configuration / 配置说明
+## 🧠 Core Intelligence / 核心智能逻辑
+
+* **Batch & Chunking (分批汇总)**: Bundles up to 6 alerts into a single, beautifully formatted message to prevent notification fatigue. (每 6 条异动自动合并推送，拒绝信息轰炸。)
+* **Cooldown Mechanism (冷却机制)**: 1-hour "silence" per asset per level. Only level-ups (e.g., from 3% to 6%) can break the cooldown. (标的 1 小时冷却逻辑，防止临界点反复横跳。)
+* **Contextual Attribution (深度归因)**: AI distinguishes between Macro  (policy/rates) and Alpha  (earnings/news). (AI 自动拆解宏观系数  与个股超额收益 。)
+
+---
+
+## 🛠️ Configuration / 配置指引
 
 ### `data/watchlist.csv`
-Add your assets here. Use `=F` for futures. (在此处添加标的，期货需带 `=F` 后缀)
+
+Add symbols here. Use `=F` suffix for futures logic. (期货需带 `=F` 后缀)
+
 ```csv
 symbol,name
 GC=F,黄金期货
 NQ=F,纳指100期货
 DX-Y.NYB,美元指数
 600519.SS,贵州茅台
+NVDA,英伟达
+
+```
+
+### GitHub Secrets
+
+* `DASHSCOPE_API_KEY`: Alibaba Qwen API (通义千问)
+* `BARK_URL`: Your private Bark Push URL (Bark 推送地址)
+
+---
+
+## 📊 Notification Preview / 推送预览
+
+> **📊 市场异动内参 (1/1)**
+> 🌐 **美元指数 +0.52%** (现价: 103.4)
+> **研判**：利率路径预期修正引发。强美元将压制黄金及成长股估值，关注晚间非农数据传导。
+> 🌋 **黄金期货 -1.20%** (现价: 2024.5)
+> **研判**：受美元走强及避险溢价回落压制。目前处于震荡下沿，关注 2010 支撑，不宜盲目追空。
+
 ---
 
 ## ⚖️ Disclaimer / 免责声明
 
-This project is for research and educational purposes only. AI-generated insights do not constitute financial advice. Market investments involve risks. The author shall not be held responsible for any investment losses incurred through the use of this system.
+**English:**
+This project is for research and educational purposes only. AI-generated insights are based on historical data and model inference, and do not constitute financial advice. Market investments involve risks. The author shall not be held responsible for any investment losses or decisions made based on this system.
 
-本项目仅供科研与学习使用。AI 生成的内容基于历史数据与模型推理，不构成任何形式的投资建议或操作指南。市场有风险，投资需谨慎。作者不对使用本系统导致的任何投资损失承担责任。
+**中文:**
+本项目仅供科研与学习使用。AI 生成的内容基于历史数据与模型推理，不构成任何形式的投资建议或操作指南。市场有风险，投资需谨慎。作者不对使用本系统导致的任何投资损失承担责任，亦不对 AI 研判的准确性做出法律保证。
