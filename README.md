@@ -51,3 +51,10 @@ GC=F,黄金期货
 NQ=F,纳指100期货
 DX-Y.NYB,美元指数
 600519.SS,贵州茅台
+---
+
+## ⚖️ Disclaimer / 免责声明
+
+This project is for research and educational purposes only. AI-generated insights do not constitute financial advice. Market investments involve risks. The author shall not be held responsible for any investment losses incurred through the use of this system.
+
+本项目仅供科研与学习使用。AI 生成的内容基于历史数据与模型推理，不构成任何形式的投资建议或操作指南。市场有风险，投资需谨慎。作者不对使用本系统导致的任何投资损失承担责任。
