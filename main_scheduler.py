@@ -17,7 +17,6 @@ DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY")
 def bark_push(title, body):
     if not BARK_URL: return
     try:
-        # 编码处理，确保推送内容包含特殊字符时不报错
         encoded_title = urllib.parse.quote(str(title))
         encoded_body = urllib.parse.quote(str(body))
         url = f"{BARK_URL.rstrip('/')}/{encoded_title}/{encoded_body}"
@@ -36,44 +35,40 @@ def save_state(state):
     with open(STATE_CACHE_PATH, "w") as f: json.dump(state, f)
 
 def fetch_top_news(symbol):
-    """增强版抓取：模拟浏览器身份防止被拦截"""
+    """支持全球市场的新闻抓取，模拟浏览器防止拦截"""
     try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
         url = f"https://query1.finance.yahoo.com/v1/finance/search?q={symbol}"
         r = requests.get(url, headers=headers, timeout=10)
         news = r.json().get("news", [])
         if not news: return f"{symbol} 暂无即时重要资讯"
         return " | ".join([n['title'] for n in news[:5]])
-    except: return f"{symbol} 新闻抓取链路异常"
+    except: return f"{symbol} 资讯链路异常"
 
-# --- 核心 AI 分析引擎（买方研究员视角） ---
+# --- 核心 AI 分析引擎 (买方研究员视角) ---
 def ai_analyze(symbol, pct, news, mode="MONITOR"):
-    if not DASHSCOPE_API_KEY: return "AI 分析 Key 缺失，请检查环境变量设置。"
+    if not DASHSCOPE_API_KEY: return "AI 分析 Key 缺失。"
     
     if mode == "MONITOR":
         trend = "上涨" if pct > 0 else "下跌"
-        # 150字买方研究员风格指令
         prompt = (
             f"【买方研究员深度分析指令】\n"
             f"标的：{symbol} | 当前市场异动：{trend} {abs(pct):.2f}%\n"
             f"参考资讯流：{news}\n\n"
             f"任务要求：\n"
-            f"1. 严谨性：以买方分析师视角，客观、准确解释股价{trend}的核心逻辑。严禁给出逻辑相左或无关的推论。\n"
-            f"2. 维度覆盖：不得遗漏以下关键点（如有）：重大宏观政策变动、所属行业趋势、公司基本面重大变化或核心公告。\n"
-            f"3. 真实性：若提供的新闻中无相关实质性利好/利空，请客观说明‘当前公开资讯未发现直接支撑逻辑’，严禁强行关联新闻。\n"
-            f"4. 规范：内容逻辑链条闭环，字数控制在150字左右，禁止空洞套话。"
+            f"1. 严谨性：以买方分析师视角，客观解释股价{trend}的核心逻辑，严禁给出逻辑相左的推论。\n"
+            f"2. 维度覆盖：不得遗漏重大宏观政策变动、所属行业趋势、公司基本面重大变化或核心公告。\n"
+            f"3. 真实性：若资讯中无实质性内容，请说明‘当前公开资讯未发现直接支撑逻辑’，严禁强行关联。\n"
+            f"4. 规范：字数在150字左右，逻辑链条闭环，禁止空洞套话。"
         )
         model = "qwen-plus"
     else: 
-        # SUMMARY 汇总模式（针对所有自选股的 24h 扫描）
         prompt = (
-            f"【自选股 24H 深度汇总报告 - 买方视角】\n资讯池：{news}\n\n"
-            f"1. 逻辑翻译与去重：将全球资讯翻译为中文，剔除噪音信息。\n"
+            f"【自选股(A/港/美) 24H 深度汇总报告】\n资讯池：{news}\n\n"
+            f"1. 翻译与去重：全球资讯翻译为中文，剔除噪音。\n"
             f"2. 深度过滤：仅保留对股价有中长期影响的重大宏观、行业、个股资讯。\n"
-            f"3. 归因分析：按公司分组，以买方研究视角输出：[关键驱动因素] + [潜在市场影响评估]。\n"
-            f"4. 要求：逻辑闭环，准确专业，单条逻辑精炼但信息量完整。"
+            f"3. 归因分析：按公司分组，以买方视角输出：[驱动因素] + [潜在市场影响评估]。\n"
+            f"4. 要求：逻辑准确专业，单条逻辑完整，总字数控制在有效范围内。"
         )
         model = "qwen-max" 
 
@@ -84,36 +79,45 @@ def ai_analyze(symbol, pct, news, mode="MONITOR"):
         r = requests.post(url, headers=headers, json=payload, timeout=40)
         return r.json()['output']['text']
     except Exception as e:
-        return f"AI 分析暂时不可用，错误信息: {str(e)}"
+        return f"AI 分析暂时不可用: {str(e)}"
 
-# --- 自动化调度主逻辑 ---
+# --- 自动化调度主逻辑 (覆盖 A/港/美 市场) ---
 def main():
     now_utc = datetime.now(timezone.utc)
-    cn_now = now_utc.astimezone(pytz.timezone("Asia/Shanghai"))
-    us_now = now_utc.astimezone(pytz.timezone("US/Eastern"))
+    cn_tz = pytz.timezone("Asia/Shanghai")
+    us_tz = pytz.timezone("US/Eastern")
+    
+    cn_now = now_utc.astimezone(cn_tz)
+    us_now = now_utc.astimezone(us_tz)
     
     action = "IDLE"
+    hm_cn = cn_now.hour * 100 + cn_now.minute
+    hm_us = us_now.hour * 100 + us_now.minute
 
-    # A股调度逻辑
-    if cn_now.weekday() < 5:
-        hm = cn_now.hour * 100 + cn_now.minute
-        if 830 <= hm <= 845: action = "SUMMARY"
-        elif (925 <= hm <= 1135) or (1255 <= hm <= 1510): action = "MONITOR"
-    
-    # 美股调度逻辑
-    if us_now.weekday() < 5:
-        hm = us_now.hour * 100 + us_now.minute
-        if 830 <= hm <= 845: action = "SUMMARY"
-        elif 925 <= hm <= 1610: action = "MONITOR"
+    # --- 1. 盘前汇总触发 (A股与港股 08:30 | 美股盘前 21:30) ---
+    if cn_now.weekday() < 5 and 830 <= hm_cn <= 845:
+        action = "SUMMARY"
+    elif us_now.weekday() < 5 and 830 <= hm_us <= 845:
+        action = "SUMMARY"
+
+    # --- 2. 实时异动监控触发 (排除盘前汇总时间) ---
+    if action == "IDLE":
+        # A股交易时段
+        if cn_now.weekday() < 5 and ((925 <= hm_cn <= 1135) or (1255 <= hm_cn <= 1510)):
+            action = "MONITOR"
+        # 港股交易时段 (包含收盘竞价)
+        elif cn_now.weekday() < 5 and ((915 <= hm_cn <= 1210) or (1255 <= hm_cn <= 1610)):
+            action = "MONITOR"
+        # 美股正式交易时段
+        elif us_now.weekday() < 5 and (925 <= hm_us <= 1610):
+            action = "MONITOR"
 
     if action == "IDLE": 
-        print(f"当前时间(CN): {cn_now.strftime('%H:%M')}，非核心监控时段，系统静默。")
+        print(f"当前时间(CN): {cn_now.strftime('%H:%M')}，非监控时段。")
         return
 
     # 加载自选股
-    if not os.path.exists(WATCHLIST_PATH):
-        print("错误：未找到 watchlist.csv 文件。")
-        return
+    if not os.path.exists(WATCHLIST_PATH): return
     with open(WATCHLIST_PATH, "r", encoding="utf-8") as f:
         stocks = [r['symbol'].strip() for r in csv.DictReader(f) if r.get('symbol')]
 
@@ -122,17 +126,14 @@ def main():
     if state.get("date") != today: state = {"date": today, "alerts": {}}
 
     if action == "SUMMARY":
-        print("正在生成买方视角盘前深度汇总...")
-        combined_news = []
-        for s in stocks: 
-            news_text = fetch_top_news(s)
-            combined_news.append(f"[{s}]\n{news_text}")
-        
-        report = ai_analyze("", 0, "\n".join(combined_news), mode="SUMMARY")
-        if report: bark_push("☕ 盘前自选股深度动态", report)
+        print("执行盘前深度汇总...")
+        news_list = []
+        for s in stocks: news_list.append(f"[{s}]\n{fetch_top_news(s)}")
+        report = ai_analyze("", 0, "\n".join(news_list), mode="SUMMARY")
+        if report: bark_push("🌍 全球自选股深度动态汇总", report)
 
     elif action == "MONITOR":
-        print("正在进行实时异动监控...")
+        print("执行异动扫描...")
         for s in stocks:
             try:
                 t = Ticker(s)
@@ -143,15 +144,13 @@ def main():
                 
                 pct = ((price - prev) / prev * 100)
                 abs_pct = abs(pct)
-                
-                # 触发阈值：3% (Level 1), 6% (Level 2)
                 level = 2 if abs_pct >= 6.0 else (1 if abs_pct >= 3.0 else 0)
                 
                 if level > state["alerts"].get(s, 0):
                     news = fetch_top_news(s)
                     analysis = ai_analyze(s, pct, news, mode="MONITOR")
-                    title = f"{'🔥' if level==2 else '🔔'} {s} {trend}{abs_pct:.2f}%"
-                    bark_push(title, f"最新价: {price}\n【深度分析】: {analysis}")
+                    title = f"{'🔥' if level==2 else '🔔'} {s} {'涨' if pct>0 else '跌'}{abs_pct:.2f}%"
+                    bark_push(title, f"现价: {price}\n【买方分析】: {analysis}")
                     state["alerts"][s] = level
             except: continue
         save_state(state)
