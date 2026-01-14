@@ -2,14 +2,14 @@ name: AI_Stock_Master_V2
 
 on:
   schedule:
-    - cron: "*/5 * * * *"  # 每5分钟运行一次，由脚本内部判断是否属于交易时段
-  workflow_dispatch:       # 允许你在 UI 界面点击按钮手动测试
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
 
 permissions:
-  contents: write         # 必须：允许脚本更新 alert_state.json 并推送到仓库
+  contents: write
 
 jobs:
-  run_main_logic:         # 任务 ID
+  run_main_logic:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
@@ -24,17 +24,16 @@ jobs:
         run: |
           pip install requests yahooquery pytz
 
-      - name: Run Intelligent Scheduler
+      - name: Run Scheduler
         env:
           BARK_URL: ${{ secrets.BARK_URL }}
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
-          WATCHLIST_PATH: "data/watchlist.csv"
         run: python main_scheduler.py
 
-      - name: Sync and Commit State
+      - name: Sync State
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add data/alert_state.json || true
-          git commit -m "Update alert state [skip ci]" || true
+          git commit -m "Update state [skip ci]" || true
           git push || true
