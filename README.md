@@ -1,6 +1,6 @@
 # stock-alerts
 中文财经预警 Early Warning for Chinese Financial Information
-# 📈 AI Stock Master V2: Global Intelligence System
+# 📈 AI-stock-monitor: Global Intelligence System
 ### (A-Shares / HK / US Stocks)
 
 [English](#english) | [中文说明](#chinese)
@@ -22,7 +22,7 @@
 
 <a name="chinese"></a>
 ## 🚀 项目简介 (中文)
-**AI Stock Master V2** 是一款专业级的全球市场自动化情报系统。基于 **GitHub Actions** 的无服务器架构，实现对 A股、港股及美股市场的 24/7 全天候监控，并提供买方研究员级别的深度洞察。
+**AI-stock-monitor** 是一款专业级的全球市场自动化情报系统。基于 **GitHub Actions** 的无服务器架构，实现对 A股、港股及美股市场的 24/7 全天候监控，并提供买方研究员级别的深度洞察。
 
 ### ✨ 核心功能
 * **全球多市场追踪**：完美支持沪深 (SS/SZ)、港股 (HK) 及美股市场。
