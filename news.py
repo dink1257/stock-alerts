@@ -1,141 +1,78 @@
-import os
-import pandas as pd
 import requests
-import dashscope
-from dashscope import Generation
+import os
+import csv
+import urllib.parse
 
-# -----------------------------
-# 读取 watchlist
-# -----------------------------
-WATCHLIST_PATH = "data/watchlist.csv"
-df = pd.read_csv(WATCHLIST_PATH)
+# --- 环境配置 ---
+WATCHLIST_PATH = os.getenv("WATCHLIST_PATH", "data/watchlist.csv")
+DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY")
+BARK_URL = os.getenv("BARK_URL")
 
-# -----------------------------
-# 配置 DashScope API
-# -----------------------------
-dashscope.api_key = os.environ.get("DASHSCOPE_API_KEY")
+def load_symbols():
+    """从 CSV 读取所有自选股代码"""
+    symbols = []
+    if not os.path.exists(WATCHLIST_PATH): return []
+    with open(WATCHLIST_PATH, "r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            if row.get("symbol"): symbols.append(row["symbol"].strip())
+    return symbols
 
-# 对应你提供的 Base URL（无需改）
-BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
-
-# -----------------------------
-# 触发“重大风险”自动切换 Plus 的关键词
-# -----------------------------
-RISK_KEYWORDS = [
-    "暴跌", "闪崩", "监管调查", "财务造假", "停牌", "破产", "诉讼",
-    "重磅消息", "黑天鹅", "地缘冲突", "制裁", "限售", "高层变动"
-]
-
-def should_use_plus(text):
-    """判断是否需要切换到 Qwen-Plus"""
-    return any(kw in text for kw in RISK_KEYWORDS)
-
-# -----------------------------
-# 获取新闻（使用 Yahoo Finance 免费新闻源）
-# -----------------------------
-def fetch_news(symbol, market):
-    """
-    获取最新 5 条新闻
-    symbol: 股票代码
-    market: US, CN, HK
-    """
-    # Yahoo Finance 格式映射
-    m = {
-        "US": "",
-        "CN": ".SS",
-        "HK": ".HK"
-    }
-    code = symbol + m.get(market.upper(), "")
-
-    url = f"https://query1.finance.yahoo.com/v1/finance/search?q={code}"
-
+def fetch_global_news(symbol):
+    """抓取自选股最新动态"""
     try:
+        url = f"https://query1.finance.yahoo.com/v1/finance/search?q={symbol}"
         r = requests.get(url, timeout=10)
-        data = r.json()
-
-        if "news" not in data:
-            return []
-
-        # 返回最多 5 条新闻标题 + 链接
-        return [
-            {"title": n.get("title"), "link": n.get("link")}
-            for n in data["news"][:5]
-        ]
-    except Exception:
+        news_data = r.json().get("news", [])
+        # 提取标题，如果是美股，这里拿到的会是英文标题
+        return [f"[{symbol}] {n['title']}" for n in news_data[:5]]
+    except:
         return []
 
-# -----------------------------
-# 调用通义千问 AI 分析新闻内容
-# -----------------------------
-def ai_analyze(news_list, symbol, market):
-    """
-    对新闻列表做 AI 中文总结
-    """
-
-    if not news_list:
-        return f"{symbol}（{market}）暂无新闻。"
-
-    titles = "\n".join([f"- {n['title']}" for n in news_list])
-
-    prompt = f"""
-你是一名专业金融分析师。请用 **中文** 分析下面这只股票的最新新闻，内容包括：
-
-1. 关键事件总结  
-2. 对价格波动可能的影响  
-3. 是否存在潜在风险（如监管、财务、行业变化）  
-4. 投资者下一步应该重点关注哪些信息  
-
-股票代码：{symbol}（{market}）
-相关新闻标题如下：
-{titles}
-
-请给出严谨、简短、专业的分析。
-"""
-
-    # 判断是否切换 Plus
-    model = "qwen-plus" if should_use_plus(titles) else "qwen-flash"
-
-    messages = [{"role": "user", "content": prompt}]
-
-    resp = requests.post(
-        BASE_URL,
-        json={
-            "model": model,
-            "messages": messages,
-            "temperature": 0.2
-        },
-        headers={"Authorization": f"Bearer {dashscope.api_key}"}
+def ai_consolidate_report(news_content):
+    """调用 AI 进行中文去重汇总"""
+    if not DASHSCOPE_API_KEY or not news_content: return None
+    
+    # 明确要求 AI 将英文内容转化为中文汇总
+    prompt = (
+        f"以下是自选股的最新动态（包含英文新闻）：\n{news_content}\n"
+        "任务：1. 翻译并剔除重复信息；2. 仅保留对股价有潜在重大影响的干货；"
+        "3. 按公司分类，用精炼的中文列表输出汇总报告（每条不超过50字）。"
     )
-
+    
     try:
-        return resp.json()["choices"][0]["message"]["content"]
-    except:
-        return f"分析失败：{resp.text}"
+        url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation"
+        headers = {"Authorization": f"Bearer {DASHSCOPE_API_KEY}", "Content-Type": "application/json"}
+        # 汇总使用更聪明的 qwen-plus 模型
+        data = {"model": "qwen-plus", "input": {"prompt": prompt}}
+        r = requests.post(url, headers=headers, json=data, timeout=30)
+        return r.json()['output']['text']
+    except Exception as e:
+        print(f"AI 汇总失败: {e}")
+        return None
 
+def main():
+    print("正在生成盘前深度汇总...")
+    symbols = load_symbols()
+    if not symbols: return
 
-# -----------------------------
-# 主执行流程
-# -----------------------------
-def run():
-    final_output = []
-
-    for _, row in df.iterrows():
-        symbol = row["symbol"]
-        market = row["market"]
-
-        news_list = fetch_news(symbol, market)
-        analysis = ai_analyze(news_list, symbol, market)
-
-        part = f"""
-===============================
-📌 股票：{symbol}（{market}）
-===============================
-{analysis}
-"""
-        final_output.append(part)
-
-    return "\n".join(final_output)
-
+    all_raw_news = []
+    for s in symbols:
+        all_raw_news.extend(fetch_global_news(s))
+    
+    # 基础去重
+    unique_raw_news = "\n".join(list(set(all_raw_news)))
+    
+    # AI 深度总结
+    summary = ai_consolidate_report(unique_raw_news)
+    
+    if summary:
+        print("汇总完成，发送推送...")
+        safe_title = urllib.parse.quote("☕ 自选股盘前早报", safe='')
+        safe_body = urllib.parse.quote(summary, safe='')
+        requests.get(f"{BARK_URL.rstrip('/')}/{safe_title}/{safe_body}", timeout=10)
+    else:
+        print("未发现重要新闻，跳过推送。")
 
 if __name__ == "__main__":
-    print(run())
+    main()
