@@ -1,0 +1,50 @@
+name: AI Stock Monitor Pipeline
+
+on:
+  schedule:
+    # 每 5 分钟运行一次，由脚本内部逻辑判断是否属于交易时段或汇总时间
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+    # 允许在 GitHub UI 手动点击运行，方便测试
+
+permissions:
+  contents: write  # 必须开启，允许脚本更新 data/alert_state.json
+
+jobs:
+  stock-analysis-service:
+    name: Market Analysis & AI Insight
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 1. Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: 2. Setup Python Environment
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: 3. Install Production Dependencies
+        run: |
+          pip install requests yahooquery pytz
+
+      - name: 4. Execute AI Intelligence Scheduler
+        env:
+          BARK_URL: ${{ secrets.BARK_URL }}
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+          WATCHLIST_PATH: "data/watchlist.csv"
+        run: python main_scheduler.py
+
+      - name: 5. Synchronize Execution State
+        # 仅当异动监控状态发生变化时，才同步 back 到仓库，保持 Commit 历史整洁
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "stock-ai-bot"
+          git add data/alert_state.json || true
+          if git diff --staged --quiet; then
+            echo "No state changes detected. Skipping commit."
+          else
+            git commit -m "chore: update market alert state [skip ci]"
+            git push
+          fi
