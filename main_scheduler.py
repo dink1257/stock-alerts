@@ -1,3 +1,9 @@
+"""
+Project: Global Macro & Asset Monitor (CIO Edition)
+Version: 4.0.0 (Batching & Advanced Layout)
+License: MIT
+Description: AI-driven multi-asset monitor for institutional grade insights.
+"""
 import requests
 import os
 import csv
