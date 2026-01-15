@@ -1,52 +1,56 @@
-name: AI Stock Monitor Pipeline (Safety Max Efficiency)
+name: Global Macro & CIO Asset Monitor
 
 on:
+  workflow_dispatch: # 保留手动触发，方便随时调试
   schedule:
-    # 1. 北京时间 09:30 - 15:59 (UTC 01:30 - 07:59) 每 6 分钟运行
-    - cron: "30/6 1-7 * * 1-5"
+    # --- A股核心监控区 (北京时间 09:00 - 15:59) ---
+    # 使用错峰分钟数：3, 13, 23, 33, 43, 53，完美避开整点压力
+    - cron: "3,13,23,33,43,53 1-7 * * 1-5"
     
-    # 2. 北京时间 16:00 - 23:59 (UTC 08:00 - 15:59) 每 20 分钟运行
-    - cron: "*/20 8-15 * * 1-5"
+    # --- 早晨总结区 (北京时间 08:26) ---
+    - cron: "26 0 * * 1-5"
     
-    # 3. 北京时间 04:00 (UTC 20:00) 美股收盘定调
-    - cron: "0 20 * * 1-5"
-    
-    # 4. 北京时间 08:30 (UTC 00:30) 盘前内参生成 (对应 main_scheduler 逻辑)
-    - cron: "30 0 * * 1-5"
-    
-  workflow_dispatch: # 保留手动测试按钮
+    # --- 美股核心监控区 (北京时间 21:30 - 04:30) ---
+    # 同样采取错峰策略，保证监控间隔在 10 分钟左右
+    - cron: "4,14,24,34,44,54 13-20 * * 1-5"
+    - cron: "4,14,24 21 * * 1-5"
 
 permissions:
   contents: write
 
 jobs:
-  stock-analysis-service:
+  monitor:
     runs-on: ubuntu-latest
+    # 强制设置超时，防止任务挂起浪费额度
+    timeout-minutes: 5
+    
     steps:
-      - name: 1. Checkout Code
-        uses: actions/checkout@v4
+      - name: Checkout Code
+        uses: actions/checkout@v3
 
-      - name: 2. Setup Python
-        uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-          cache: 'pip' # 必须启用缓存
+          # 使用缓存机制，进一步提速环境准备时间
+          cache: 'pip'
 
-      - name: 3. Install Dependencies
-        run: pip install requests yahooquery pytz
+      - name: Install Dependencies
+        run: |
+          pip install --upgrade pip
+          pip install requests pytz yahooquery
 
-      - name: 4. Execute Engine
+      - name: Run CIO Monitor
         env:
           BARK_URL: ${{ secrets.BARK_URL }}
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
           WATCHLIST_PATH: "data/watchlist.csv"
-        run: |
-          mkdir -p data
-          python main_scheduler.py
+        run: python main_scheduler.py
 
-      - name: 5. Sync State
+      - name: Commit and Push State
+        # 仅当状态文件发生变化时才提交，减少无效 Commit
         run: |
           git config --local user.email "action@github.com"
-          git config --local user.name "bot"
-          git add data/alert_state.json || true
-          git diff --staged --quiet || (git commit -m "chore: sync market state [skip ci]" && git push)
+          git config --local user.name "GitHub Action"
+          git add data/alert_state.json
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Update monitor state [skip ci]" && git push)
