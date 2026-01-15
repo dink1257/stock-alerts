@@ -1,17 +1,22 @@
 name: Global Macro & CIO Asset Monitor
 
 on:
-  workflow_dispatch: # 保留手动触发，方便随时调试
+  workflow_dispatch:
   schedule:
-    # --- A股核心监控区 (北京时间 09:00 - 15:59) ---
-    # 使用错峰分钟数：3, 13, 23, 33, 43, 53，完美避开整点压力
-    - cron: "3,13,23,33,43,53 1-7 * * 1-5"
+    # --- A股早盘 & 午前 (北京时间 09:03 - 11:33) ---
+    - cron: "3,13,23,33,43,53 1-3 * * 1-5"
     
-    # --- 早晨总结区 (北京时间 08:26) ---
+    # --- 午间休市窗口期 (北京时间 12:48 运行一次) ---
+    # 专门捕捉午间证监会、发改委等突发政策或重大公告
+    - cron: "48 4 * * 1-5"
+    
+    # --- A股下午盘 (北京时间 13:03 - 15:53) ---
+    - cron: "3,13,23,33,43,53 5-7 * * 1-5"
+    
+    # --- 早晨 CIO 内参 (北京时间 08:26) ---
     - cron: "26 0 * * 1-5"
     
     # --- 美股核心监控区 (北京时间 21:30 - 04:30) ---
-    # 同样采取错峰策略，保证监控间隔在 10 分钟左右
     - cron: "4,14,24,34,44,54 13-20 * * 1-5"
     - cron: "4,14,24 21 * * 1-5"
 
@@ -21,9 +26,7 @@ permissions:
 jobs:
   monitor:
     runs-on: ubuntu-latest
-    # 强制设置超时，防止任务挂起浪费额度
     timeout-minutes: 5
-    
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
@@ -32,7 +35,6 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-          # 使用缓存机制，进一步提速环境准备时间
           cache: 'pip'
 
       - name: Install Dependencies
@@ -48,7 +50,6 @@ jobs:
         run: python main_scheduler.py
 
       - name: Commit and Push State
-        # 仅当状态文件发生变化时才提交，减少无效 Commit
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
