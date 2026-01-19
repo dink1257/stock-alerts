@@ -1,17 +1,18 @@
 """
 Project: Global Macro & Asset Monitor (CIO Edition)
-Version: 5.2.6 (CIO Decision Engine)
-Focus: 基本面量化、持仓预警、技术交易窗口、潜流推演
+Version: 5.2.7 (Final Decision Engine)
+Focus: 零冗余推送、全网深度检索、买方决策逻辑、技术交易窗口
 """
 import requests, os, csv, pytz, json, time, hashlib
 from datetime import datetime, timezone
 from yahooquery import Ticker
 
-# --- 环境配置 ---
+# --- 系统配置 ---
 WATCHLIST_PATH = os.getenv("WATCHLIST_PATH", "data/watchlist.csv")
 STATE_CACHE_PATH = "data/alert_state.json"
 BARK_URL = os.getenv("BARK_URL")
 DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY")
+VOLATILITY_LOCK = 2.5  # 同一阈值区间内，涨跌幅变动超2.5%才允许再次推送
 
 def bark_push(title, body):
     if not BARK_URL: return
@@ -38,48 +39,49 @@ def save_state(state):
     with open(STATE_CACHE_PATH, "w") as f: json.dump(state, f)
 
 def fetch_enhanced_context(symbol, name):
-    """强化搜索：若无直观新闻，尝试抓取异动传闻和市场评论"""
+    """强化搜索：针对 A/H/US 市场抓取公告、传闻与异动内参"""
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
-        search_query = f"{name} {symbol.split('.')[0]} 异动 传闻 公告"
-        url = f"https://query1.finance.yahoo.com/v1/finance/search?q={search_query}&newsCount=5"
+        # 搜索策略：简称 + 代码 + 核心关键词
+        query = f"{name} {symbol.split('.')[0]} 异动 传闻 公告"
+        url = f"https://query1.finance.yahoo.com/v1/finance/search?q={query}&newsCount=5"
         r = requests.get(url, headers=headers, timeout=5)
         news_items = r.json().get("news", [])
         
         raw_text = ""
+        news_list = []
         for n in news_items:
-            raw_text += f"· {n.get('title','')} (来源:{n.get('publisher','')})\n"
+            t = n.get('title', '')
+            news_list.append(f"· {t} (来源:{n.get('publisher','')})")
+            raw_text += t
         
-        news_hash = hashlib.md5(raw_text.encode()).hexdigest() if raw_text else "no_news_hash"
-        return raw_text if raw_text else "全网暂无即时公开资讯流。", news_hash
+        content = "\n".join(news_list) if news_list else "全网暂无公开新增资讯流。"
+        n_hash = hashlib.md5(raw_text.encode()).hexdigest() if raw_text else "no_news"
+        return content, n_hash
     except:
-        return "资讯抓取异常", "err_hash"
+        return "资讯抓取链路异常", "err_hash"
 
-def ai_decision_engine(symbol_info, price_data, news_text):
-    """
-    顶级买方 CIO 指令集注入
-    """
-    pct = price_data['pct']
-    # 提取关键技术位数据
-    tech_context = (
-        f"现价: {price_data['price']}, 52周最高: {price_data['high52']}, "
-        f"52周最低: {price_data['low52']}, 日内区间: {price_data['range']}"
-    )
-
+def ai_decision_engine(symbol_info, price_meta, news_text):
+    """注入买方 CIO 5大核心指令集"""
     prompt = f"""
-你是一位管理全球头寸的买方投资总监（CIO），兼具第一性原理深度与交易敏感度。
-标的: {symbol_info} | 涨跌幅: {pct:.2f}%
-技术位参考: {tech_context}
-关联资讯: {news_text}
+你是一位管理百亿头寸的买方投资总监（CIO）。请针对【{symbol_info}】进行深度研判。
 
-请严格按以下逻辑输出研判（150字内）：
-1.【逻辑定性】判定异动时效：短期博弈、中长期重构、或随机波动？
+【盘面数据】
+现价: {price_meta['price']} | 涨跌幅: {price_meta['pct']:.2f}%
+52周区间: {price_meta['low52']} - {price_meta['high52']}
+日内波动: {price_meta['range']}
+
+【核心资讯流】
+{news_text}
+
+【研判任务】请严格执行：
+1.【逻辑定性】判定异动时效：是短期博弈、中长期重构、还是随机噪音？
 2.【实质影响】量化描述对业务、财务及行业地位的实损或利好。
-3.【持仓预警】逻辑是否改变？若触及逻辑证伪点请预警，无则忽略。
-4.【交易窗口】比对技术位，分析趋势状态，给出高抛/低吸或观望的交易性机会建议。
-5.【深度潜流】(核心)若无资讯，请基于第一性原理推演潜在的未公开风险或隐性机会。
+3.【持仓预警】逻辑是否松动？若触及逻辑证伪点（如中免收购逻辑变质）请明确预警。
+4.【交易窗口】比对技术位，分析趋势状态（超买/超卖/破位），给出高抛、低吸或观望建议。
+5.【深度潜流】若无公开资讯，必须基于行业第一性原理推演潜在的未公开风险或隐性机会。
 
-拒绝废话，直指本质。
+要求：冷静、犀利、结构化。拒绝废话。
 """
     try:
         url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation"
@@ -87,12 +89,15 @@ def ai_decision_engine(symbol_info, price_data, news_text):
         payload = {"model": "qwen-plus", "input": {"prompt": prompt}}
         r = requests.post(url, headers=headers, json=payload, timeout=30)
         return r.json()['output']['text']
-    except: return "CIO逻辑引擎暂时脱机。"
+    except: return "CIO逻辑引擎暂时脱机，请根据盘面数据自主决策。"
 
 def main():
     now_utc = datetime.now(timezone.utc)
     cn_now = now_utc.astimezone(pytz.timezone("Asia/Shanghai"))
     time_str = cn_now.strftime('%H:%M:%S')
+    
+    # 盘后静默逻辑（可选启用，当前依靠熵增逻辑更精准）
+    # if 1515 <= int(cn_now.strftime('%H%M')) <= 2100: return
 
     if not os.path.exists(WATCHLIST_PATH): return
     with open(WATCHLIST_PATH, "r", encoding="utf-8") as f:
@@ -113,7 +118,6 @@ def main():
         data = all_data.get(s)
         if not isinstance(data, dict): continue
         
-        # 提取基础与技术位数据
         price = data.get("regularMarketPrice")
         prev = data.get("regularMarketPreviousClose")
         if not price or not prev: continue
@@ -126,30 +130,42 @@ def main():
             'range': f"{data.get('regularMarketDayLow')} - {data.get('regularMarketDayHigh')}"
         }
 
-        # 1. 资讯搜集与一致性校验
+        # 1. 资讯采集与哈希化
         news_content, current_hash = fetch_enhanced_context(s, name)
         
-        # 2. 判定推送阈值
+        # 2. 状态对比 (拦截冗余核心)
         level = 2 if abs(pct) >= 6.0 else (1 if abs(pct) >= 3.0 else 0)
         last_level = state["alerts"].get(s, 0)
         last_pct = state["last_pct"].get(s, 0.0)
         last_hash = state["last_news_hash"].get(s, "")
 
-        # 推送条件：级别提升 OR 新闻更新 OR (无新闻但价格波动巨大且此前未推)
-        should_push = (level > last_level) or (current_hash != last_hash)
-        
-        if should_push and level > 0:
-            print(f"[{time_str}] 触发 CIO 决策流: {name}")
+        # 判定开关
+        news_updated = (current_hash != last_hash) and (current_hash != "no_news")
+        level_broken = (level > last_level)
+        significant_move = abs(pct - last_pct) >= VOLATILITY_LOCK
+
+        should_push = False
+        reason = ""
+        if news_updated:
+            should_push, reason = True, "【新增关联逻辑】"
+        elif level_broken:
+            should_push, reason = True, "【阶梯阈值突破】"
+        elif level > 0 and significant_move:
+            should_push, reason = True, "【区间剧烈波动】"
+
+        if should_push:
+            print(f"[{time_str}] {name} 触发研判: {reason}")
             analysis = ai_decision_engine(f"{name}({s})", price_meta, news_content)
-            pending_alerts.append(f"🛡️ CIO 策略 [{name} {pct:.2f}%]\n{analysis}")
+            pending_alerts.append(f"🛡️ CIO策略 [{name} {pct:.2f}%]\n🕒 报时: {time_str}\n{analysis}")
             
-            # 更新状态
+            # 更新持久化状态
             state["alerts"][s] = level
             state["last_pct"][s] = pct
             state["last_news_hash"][s] = current_hash
 
     if pending_alerts:
-        bark_push(f"📊 CIO 深度内参 [{time_str}]", "\n\n".join(pending_alerts))
+        # 每条推送包含更多信息量，减少分条推送频率
+        bark_push(f"📊 CIO 深度内参", "\n\n".join(pending_alerts))
 
     save_state(state)
 
