@@ -1,35 +1,28 @@
 """
 Project: Global Macro & Asset Monitor (CIO Edition)
-Version: 5.2.3 (CIO Logic & Deep Analysis Edition)
-Description: 整合买方总监决策逻辑与第一性原理，提供高维度异动研判。
+Version: 5.2.6 (CIO Decision Engine)
+Focus: 基本面量化、持仓预警、技术交易窗口、潜流推演
 """
-import requests
-import os
-import csv
-import pytz
-import json
-import time
+import requests, os, csv, pytz, json, time, hashlib
 from datetime import datetime, timezone
 from yahooquery import Ticker
 
-# --- 配置区 ---
+# --- 环境配置 ---
 WATCHLIST_PATH = os.getenv("WATCHLIST_PATH", "data/watchlist.csv")
 STATE_CACHE_PATH = "data/alert_state.json"
 BARK_URL = os.getenv("BARK_URL")
 DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY")
-COOL_DOWN_SECONDS = 3600  
-CHUNK_SIZE = 4           # 由于分析深度增加，每条推送包含4个标的，避免排版过挤
 
 def bark_push(title, body):
     if not BARK_URL: return
     try:
         url = f"{BARK_URL.rstrip('/')}/"
-        payload = {"title": title, "body": body, "group": "InvestmentMonitor", "sound": "calypso"}
+        payload = {"title": title, "body": body, "group": "CIO_Decision", "sound": "minuet"}
         requests.post(url, json=payload, timeout=10)
     except: pass
 
 def load_state():
-    default_state = {"date": "", "alerts": {}, "last_push_time": {}}
+    default_state = {"date": "", "alerts": {}, "last_pct": {}, "last_news_hash": {}}
     if os.path.exists(STATE_CACHE_PATH):
         try:
             with open(STATE_CACHE_PATH, "r") as f:
@@ -44,125 +37,119 @@ def save_state(state):
     os.makedirs(os.path.dirname(STATE_CACHE_PATH), exist_ok=True)
     with open(STATE_CACHE_PATH, "w") as f: json.dump(state, f)
 
-def fetch_top_news(symbol):
+def fetch_enhanced_context(symbol, name):
+    """强化搜索：若无直观新闻，尝试抓取异动传闻和市场评论"""
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
-        url = f"https://query1.finance.yahoo.com/v1/finance/search?q={symbol}"
+        search_query = f"{name} {symbol.split('.')[0]} 异动 传闻 公告"
+        url = f"https://query1.finance.yahoo.com/v1/finance/search?q={search_query}&newsCount=5"
         r = requests.get(url, headers=headers, timeout=5)
-        news = r.json().get("news", [])
-        return " | ".join([n['title'] for n in news[:3]]) if news else "暂无显著产业新闻"
-    except: return "资讯抓取略过"
+        news_items = r.json().get("news", [])
+        
+        raw_text = ""
+        for n in news_items:
+            raw_text += f"· {n.get('title','')} (来源:{n.get('publisher','')})\n"
+        
+        news_hash = hashlib.md5(raw_text.encode()).hexdigest() if raw_text else "no_news_hash"
+        return raw_text if raw_text else "全网暂无即时公开资讯流。", news_hash
+    except:
+        return "资讯抓取异常", "err_hash"
 
-def ai_analyze(symbol_info, pct, news, mode="MONITOR", asset_type="STOCK"):
-    if not DASHSCOPE_API_KEY: return "AI Key 缺失"
-    model = "qwen-plus" # 推荐使用 plus，其逻辑严密性更适合 CIO 视角
-    
-    if mode == "MONITOR":
-        # --- 整合：买方投资总监 + 第一性原理 Prompt ---
-        prompt = f"""
-你现在是一位管理百亿头寸的买方投资总监（CIO）。请对以下异动进行底层逻辑研判。
-要求：拒绝任何技术指标、K线描述、短期情绪词汇。穿透波动，直击本质。
+def ai_decision_engine(symbol_info, price_data, news_text):
+    """
+    顶级买方 CIO 指令集注入
+    """
+    pct = price_data['pct']
+    # 提取关键技术位数据
+    tech_context = (
+        f"现价: {price_data['price']}, 52周最高: {price_data['high52']}, "
+        f"52周最低: {price_data['low52']}, 日内区间: {price_data['range']}"
+    )
 
-【输入信息】
-标的：{symbol_info}
-当日变动：{pct:.2f}%
-最新资讯：{news}
+    prompt = f"""
+你是一位管理全球头寸的买方投资总监（CIO），兼具第一性原理深度与交易敏感度。
+标的: {symbol_info} | 涨跌幅: {pct:.2f}%
+技术位参考: {tech_context}
+关联资讯: {news_text}
 
-【研判要求】
-1. 第一性原理归因：指出变动触动了产业逻辑、竞争壁垒还是长期现金流预期的哪一环。
-2. 确定性评估：判断异动是确定性逻辑的强化，还是博弈性噪音。
-3. CIO定调：给出“核心仓位不动”、“逻辑边际减损”或“关注定价偏差”的决策建议。
+请严格按以下逻辑输出研判（150字内）：
+1.【逻辑定性】判定异动时效：短期博弈、中长期重构、或随机波动？
+2.【实质影响】量化描述对业务、财务及行业地位的实损或利好。
+3.【持仓预警】逻辑是否改变？若触及逻辑证伪点请预警，无则忽略。
+4.【交易窗口】比对技术位，分析趋势状态，给出高抛/低吸或观望的交易性机会建议。
+5.【深度潜流】(核心)若无资讯，请基于第一性原理推演潜在的未公开风险或隐性机会。
 
-请按此格式输出（100字内）：
-【底层逻辑】
-【定价评估】
-【CIO定调】
+拒绝废话，直指本质。
 """
-    else:
-        prompt = f"请以首席投资官视角，对以下全市场资讯进行‘脱水研判’。过滤噪音，只看产业趋势的边际变化及跨资产定价的底层逻辑：{news}"
-
     try:
         url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation"
         headers = {"Authorization": f"Bearer {DASHSCOPE_API_KEY}", "Content-Type": "application/json"}
-        payload = {"model": model, "input": {"prompt": prompt}}
+        payload = {"model": "qwen-plus", "input": {"prompt": prompt}}
         r = requests.post(url, headers=headers, json=payload, timeout=30)
         return r.json()['output']['text']
-    except: return "AI 逻辑推演波动，请关注原始价格变动。"
+    except: return "CIO逻辑引擎暂时脱机。"
 
 def main():
     now_utc = datetime.now(timezone.utc)
-    cn_tz = pytz.timezone("Asia/Shanghai")
-    cn_now = now_utc.astimezone(cn_tz)
+    cn_now = now_utc.astimezone(pytz.timezone("Asia/Shanghai"))
     time_str = cn_now.strftime('%H:%M:%S')
-    
-    hm_cn = cn_now.hour * 100 + cn_now.minute
-    action = "MONITOR" 
-    if 825 <= hm_cn <= 905: action = "SUMMARY"
-    
+
     if not os.path.exists(WATCHLIST_PATH): return
     with open(WATCHLIST_PATH, "r", encoding="utf-8") as f:
         watchlist = list(csv.DictReader(f))
+    
     symbols = [i['symbol'] for i in watchlist]
-
-    # --- 批量抓取数据 ---
-    all_prices = {}
-    try:
-        te = Ticker(symbols, asynchronous=True, formatted=False)
-        all_prices = te.price
-    except:
-        for s in symbols:
-            try: all_prices[s] = Ticker(s).price[s]
-            except: continue
+    te = Ticker(symbols, asynchronous=True, formatted=False)
+    all_data = te.price
 
     state = load_state()
     today_str = cn_now.strftime('%Y%m%d')
     if state.get("date") != today_str:
-        state = {"date": today_str, "alerts": {}, "last_push_time": {}}
+        state = {"date": today_str, "alerts": {}, "last_pct": {}, "last_news_hash": {}}
 
-    if action == "SUMMARY":
-        news_list = [f"[{i['name']}]\n{fetch_top_news(i['symbol'])}" for i in watchlist]
-        bark_push(f"🌍 CIO 内参 [{time_str}]", ai_analyze("", 0, "\n".join(news_list), mode="SUMMARY"))
-    
-    elif action == "MONITOR":
-        pending_alerts = []
-        current_ts = time.time()
+    pending_alerts = []
+    for item in watchlist:
+        s, name = item['symbol'], item['name']
+        data = all_data.get(s)
+        if not isinstance(data, dict): continue
         
-        for item in watchlist:
-            s, name = item['symbol'], item['name']
-            p_raw = all_prices.get(s)
-            if not isinstance(p_raw, dict): continue
-            
-            price = p_raw.get("regularMarketPrice")
-            prev = p_raw.get("regularMarketPreviousClose")
-            if price is None or prev is None: continue
-            
-            pct = ((price - prev) / prev * 100)
-            asset_type, l1, l2 = "STOCK", 3.0, 6.0
-            if "=F" in s: asset_type, l1, l2 = "FUTURES", 1.5, 3.0
-            elif s in ["DX-Y.NYB", "^TNX", "CNY=X"]: asset_type, l1, l2 = "MACRO", 0.5, 1.0
+        # 提取基础与技术位数据
+        price = data.get("regularMarketPrice")
+        prev = data.get("regularMarketPreviousClose")
+        if not price or not prev: continue
+        
+        pct = ((price - prev) / prev * 100)
+        price_meta = {
+            'price': price, 'pct': pct,
+            'high52': data.get("fiftyTwoWeekHigh"),
+            'low52': data.get("fiftyTwoWeekLow"),
+            'range': f"{data.get('regularMarketDayLow')} - {data.get('regularMarketDayHigh')}"
+        }
 
-            level = 2 if abs(pct) >= l2 else (1 if abs(pct) >= l1 else 0)
-            if level > 0:
-                last_lvl = state.get("alerts", {}).get(s, 0)
-                last_ts = state.get("last_push_time", {}).get(s, 0)
-                
-                if level > last_lvl or (level == last_lvl and (current_ts - last_ts) > COOL_DOWN_SECONDS):
-                    print(f"[{time_str}] 深度分析: {name}")
-                    news = fetch_top_news(s)
-                    analysis = ai_analyze(f"{name}({s})", pct, news, "MONITOR", asset_type)
-                    emoji = "🌐" if asset_type == "MACRO" else ("🌋" if asset_type == "FUTURES" else "🔔")
-                    
-                    pending_alerts.append(f"{emoji} {name} {pct:.2f}%\n🕒 报时: {time_str}\n{analysis}")
-                    
-                    state["alerts"][s] = level
-                    state["last_push_time"][s] = current_ts
+        # 1. 资讯搜集与一致性校验
+        news_content, current_hash = fetch_enhanced_context(s, name)
+        
+        # 2. 判定推送阈值
+        level = 2 if abs(pct) >= 6.0 else (1 if abs(pct) >= 3.0 else 0)
+        last_level = state["alerts"].get(s, 0)
+        last_pct = state["last_pct"].get(s, 0.0)
+        last_hash = state["last_news_hash"].get(s, "")
 
-        if pending_alerts:
-            total_batches = (len(pending_alerts) + CHUNK_SIZE - 1) // CHUNK_SIZE
-            for i in range(0, len(pending_alerts), CHUNK_SIZE):
-                chunk = pending_alerts[i:i + CHUNK_SIZE]
-                title = f"📊 CIO 深度研判 [{time_str}] ({i//CHUNK_SIZE + 1}/{total_batches})"
-                bark_push(title, "\n\n".join(chunk))
+        # 推送条件：级别提升 OR 新闻更新 OR (无新闻但价格波动巨大且此前未推)
+        should_push = (level > last_level) or (current_hash != last_hash)
+        
+        if should_push and level > 0:
+            print(f"[{time_str}] 触发 CIO 决策流: {name}")
+            analysis = ai_decision_engine(f"{name}({s})", price_meta, news_content)
+            pending_alerts.append(f"🛡️ CIO 策略 [{name} {pct:.2f}%]\n{analysis}")
+            
+            # 更新状态
+            state["alerts"][s] = level
+            state["last_pct"][s] = pct
+            state["last_news_hash"][s] = current_hash
+
+    if pending_alerts:
+        bark_push(f"📊 CIO 深度内参 [{time_str}]", "\n\n".join(pending_alerts))
 
     save_state(state)
 
