@@ -1,23 +1,24 @@
 """
 Project: Global Macro & Asset Monitor (CIO Edition)
-Version: 5.3.2 (Global Market Sentinel)
+Version: 5.3.3 (Index Anchor & Market Context)
+Focus: 指数/个股双重研判、全时段开盘前哨、格式绝对锁定
 """
 import requests, os, csv, pytz, json, time, hashlib
 from datetime import datetime, timezone
 from yahooquery import Ticker
 
-# --- 配置区 ---
+# --- 系统配置 ---
 WATCHLIST_PATH = os.getenv("WATCHLIST_PATH", "data/watchlist.csv")
 STATE_CACHE_PATH = "data/alert_state.json"
 BARK_URL = os.getenv("BARK_URL")
 DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY")
-VOLATILITY_LOCK = 2.5 
+VOLATILITY_LOCK = 1.5  # 指数波动通常较小，将锁设为1.5%以提高指数敏感度
 
 def bark_push(title, body):
     if not BARK_URL: return
     try:
         url = f"{BARK_URL.rstrip('/')}/"
-        payload = {"title": title, "body": body, "group": "CIO_Sentinel", "sound": "anticipate"}
+        payload = {"title": title, "body": body, "group": "CIO_Intelligence", "sound": "anticipate"}
         requests.post(url, json=payload, timeout=10)
     except: pass
 
@@ -38,11 +39,15 @@ def save_state(state):
     with open(STATE_CACHE_PATH, "w") as f: json.dump(state, f)
 
 def fetch_enhanced_context(symbol, name):
-    """深度扫描引擎：不仅看个股，更看关联的监管与政策变动"""
+    """深度扫描：指数关注宏观/政策，个股关注业务/监管"""
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
-        # 核心搜索策略：标的 + 监管关键词（确保不遗漏保证金、限制等重磅）
-        query = f"{name} {symbol.split('.')[0]} 突发 政策 监管 保证金 财报"
+        is_index = symbol.startswith('^') or symbol.endswith('.SS') or symbol.endswith('.SZ')
+        if is_index:
+            query = f"{name} 宏观政策 货币环境 市场走势 传闻"
+        else:
+            query = f"{name} {symbol.split('.')[0]} 监管 保证金 政策 异动"
+            
         url = f"https://query1.finance.yahoo.com/v1/finance/search?q={query}&newsCount=5"
         r = requests.get(url, headers=headers, timeout=8)
         news_items = r.json().get("news", [])
@@ -53,31 +58,35 @@ def fetch_enhanced_context(symbol, name):
             news_list.append(f"· {t}")
             raw_text += t
         
-        content = "\n".join(news_list) if news_list else "全网暂无公开新增逻辑变量。"
+        content = "\n".join(news_list) if news_list else "暂无新增逻辑变量。"
         n_hash = hashlib.md5(raw_text.encode()).hexdigest() if raw_text else "no_news"
         return content, n_hash
     except:
-        return "资讯接口响应延迟。", "err_hash"
+        return "资讯流抓取延迟。", "err_hash"
 
 def ai_decision_engine(symbol_info, price_meta, news_text, is_summary=False, is_opening=False):
-    """严格锁定 CIO 五维格式输出"""
+    """严格锁定 CIO 五维格式输出，动态适配指数与个股逻辑"""
+    is_index = any(x in symbol_info for x in ['指数', '成指', '^', 'Index'])
+    
     if not is_summary:
-        tag = "【开盘前决策前瞻】" if is_opening else "【实时异动深度研判】"
+        tag = "【开盘哨兵】" if is_opening else "【深度研判】"
+        target_type = "指数（大盘环境）" if is_index else "个股（标的基本面）"
+        
         prompt = f"""
-你现在是顶级买方投资总监。请针对{tag}标的【{symbol_info}】进行穿透。
+你现在是顶级买方投资总监。请针对{tag} {target_type}【{symbol_info}】进行穿透研判。
 现价: {price_meta.get('price')} | 涨跌幅: {price_meta.get('pct', 0):.2f}% | 资讯: {news_text}
 
 请严格按此格式输出（150字内）：
-1.【逻辑定性】短期博弈/长期重构/随机噪音？（若是政策，请指出级别）
-2.【实质影响】量化描述对业务、财务的实损或利好。
-3.【持仓预警】若触及逻辑证伪点（如监管风向转冷、保证金调整）请明确预警。
-4.【交易窗口】结合趋势与政策压力，给出具体的撤退/抄底/对冲建议。
-5.【深度潜流】基于第一性原理，推演该信息背后未露出的监管意图或行业拐点。
+1.【逻辑定性】短期博弈/长期重构/随机噪音？(指数请分析宏观情绪)
+2.【实质影响】{"对个股业务与财务的实损" if not is_index else "对全天市场赚钱效应与板块流动性的影响"}。
+3.【持仓预警】若触及逻辑证伪点（如系统性风险、政策限制）请明确预警。
+4.【交易窗口】给出具体的交易建议（如：个股对冲/指数看涨期权布局/减仓观望）。
+5.【深度潜流】基于第一性原理，推演信息背后未露出的监管意图或宏观转向。
 """
     else:
-        prompt = f"""你现在是买方总监。请对全天自选股表现进行【收盘脱水点评】：
+        prompt = f"""你现在是买方总监。请对全天表现进行【收盘脱水点评】：
 清单: {symbol_info}
-要求：1.总结涨跌质量。2.识别异常诱因。3.给出次日核心要点。字数100内。"""
+要求：1.总结主线涨跌质量。2.识别最异常标的及其底层诱因。3.给出次日策略建议。字数100字内。"""
 
     try:
         url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation"
@@ -85,7 +94,7 @@ def ai_decision_engine(symbol_info, price_meta, news_text, is_summary=False, is_
         payload = {"model": "qwen-plus", "input": {"prompt": prompt}}
         r = requests.post(url, headers=headers, json=payload, timeout=25)
         return r.json()['output']['text']
-    except: return "CIO逻辑引擎暂时脱机。"
+    except: return "CIO决策流超时，请根据盘面自主判断。"
 
 def main():
     now_utc = datetime.now(timezone.utc)
@@ -107,7 +116,7 @@ def main():
         all_data = te.price
     except: return
 
-    # --- A/H/US 汇总逻辑 (收盘时点触发) ---
+    # --- 收盘总结逻辑 ---
     is_summary_time, label = False, ""
     if 1510 <= hm_cn <= 1525 and "CN_CLOSE" not in state["summary_done"]:
         is_summary_time, label = True, "CN_CLOSE"
@@ -121,8 +130,7 @@ def main():
         state["summary_done"].append(label)
         save_state(state)
 
-    # --- 异动 & 各市场开盘前哨逻辑 ---
-    # 定义开盘前扫描窗口 (A/H早盘, A午盘, 美股盘前)
+    # --- 异动 & 开盘前哨 (核心增强) ---
     is_opening_scan = (830 <= hm_cn <= 930) or (1240 <= hm_cn <= 1300) or (2030 <= hm_cn <= 2135)
     
     pending_alerts = []
@@ -135,13 +143,20 @@ def main():
         pct = (price - data.get("regularMarketPreviousClose", price)) / data.get("regularMarketPreviousClose", 1) * 100
         news_content, current_hash = fetch_enhanced_context(s, name)
         
-        # 触发逻辑：1.级别提升 2.新闻更新 3.开盘前窗口有新逻辑
-        level = 2 if abs(pct) >= 6.0 else (1 if abs(pct) >= 3.0 else 0)
+        # 判定触发：新闻哈希变化为最高优先级
         news_updated = (current_hash != state["last_news_hash"].get(s, "")) and (current_hash != "no_news")
         
-        if news_updated or (level > state["alerts"].get(s, 0)) or (abs(pct - state["last_pct"].get(s, 0)) >= VOLATILITY_LOCK):
-            # 在开盘前窗口，只要有新资讯，强制推送，无论涨跌
-            if news_updated or level > 0:
+        # 指数波动锁更小，个股保持原有锁
+        is_idx = any(x in name for x in ['指数', '成指', '^'])
+        dynamic_lock = 1.0 if is_idx else VOLATILITY_LOCK
+        
+        level = 2 if abs(pct) >= 6.0 else (1 if abs(pct) >= 3.0 else 0)
+        
+        triggered = news_updated or (level > state["alerts"].get(s, 0)) or (abs(pct - state["last_pct"].get(s, 0)) >= dynamic_lock)
+
+        if triggered:
+            # 在开盘前窗口或有实质新闻时，即便波动不大也推送
+            if news_updated or level > 0 or is_opening_scan:
                 p_meta = {'price': price, 'pct': pct, 'high52': data.get("fiftyTwoWeekHigh"), 'low52': data.get("fiftyTwoWeekLow")}
                 analysis = ai_decision_engine(f"{name}({s})", p_meta, news_content, is_opening=is_opening_scan)
                 pending_alerts.append(f"🛡️ CIO策略 [{name} {pct:.2f}%]\n{analysis}")
