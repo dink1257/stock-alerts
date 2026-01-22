@@ -25,7 +25,7 @@ permissions:
 jobs:
   monitor:
     runs-on: ubuntu-latest
-    timeout-minutes: 10  # 增加到10分钟，防止AI分析耗时导致被强制关闭
+    timeout-minutes: 20  # 增加到10分钟，防止AI分析耗时导致被强制关闭
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
