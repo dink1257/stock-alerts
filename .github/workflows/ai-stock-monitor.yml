@@ -1,15 +1,13 @@
-name: CIO Daily Monitor (V5.7.6)
+name: CIO Daily Monitor (V5.7.9)
 
 on:
   workflow_dispatch:
   schedule:
-    # --- 核心调度：避开非活跃时段，压减 70% 额度消耗 ---
-    - cron: "26 0 * * 1-5"      # 08:26 晨间全量审计 (最重要的穿透扫描)
-    - cron: "5,35 1-2 * * 1-5"  # 09:05-10:35 A股早盘异动
-    - cron: "48 4 * * 1-5"      # 12:48 午间行业因果复盘
-    - cron: "5,35 5-6 * * 1-5"  # 13:05-14:35 A股下午盘
-    - cron: "53 6 * * 1-5"      # 14:53 A股收盘前最后确认
-    - cron: "34 13-14 * * 1-5" # 21:34-22:34 美股开盘期
+    - cron: "26 0 * * 1-5"      # 08:26 审计
+    - cron: "5,35 1-2 * * 1-5"  # 早盘
+    - cron: "48 4 * * 1-5"      # 午间
+    - cron: "5,35 5-7 * * 1-5"  # 下午盘
+    - cron: "34 13-15 * * 1-5" # 美股
 
 permissions:
   contents: write
@@ -18,41 +16,23 @@ permissions:
 jobs:
   monitor:
     runs-on: ubuntu-latest
-    # --- 优化点 1：缩短超时，止损额度 ---
-    # 15分钟足够 AI 完成“前五大股东+高管+行业”的穿透分析
     timeout-minutes: 15
-    
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
-        with:
-          persist-credentials: true
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-          cache: 'pip' # --- 优化点 2：开启 pip 缓存，加速运行，省分钟数 ---
-
-      - name: Install Dependencies
-        run: |
-          pip install --upgrade pip
-          pip install requests pytz yahooquery
-
-      - name: Run CIO Monitor
+          cache: 'pip'
+      - run: pip install requests pytz yahooquery
+      - name: Execution
         env:
-          # --- 优化点 3：强制注入，确保 Secrets 在 Schedule 模式下 100% 成功 ---
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
-          WATCHLIST_PATH: "data/watchlist.csv"
         run: python -u main_scheduler.py
-
       - name: State Sync
-        # --- 优化点 4：增强鲁棒性，防止高频运行时 git push 冲突 ---
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git pull --rebase origin main || true
           git add data/alert_state.json || true
-          # 只有文件真实改变才 commit，减少仓库体积
           git diff --quiet && git diff --staged --quiet || (git commit -m "Update state [skip ci]" && git push)
