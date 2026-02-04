@@ -1,94 +1,75 @@
-# 🌍 Global Macro & Asset Monitor (CIO Edition)
+# 🌍 OpenClaw: AI-Driven Multi-Asset CIO Decision Hub
+# 🌍 OpenClaw: AI 驱动的全资产买方总监决策中心
 
-### 全球全资产 CIO 智能监控实验室
-
-**Version:** 6.6.0 (High-Efficiency Asymmetric Edition)
-
-**Core Engine:** Alibaba Qwen-Max/Plus (DashScope)
-
-**Delivery:** Bark Push (iOS/macOS)
-
-**License:** MIT
+**Version:** 6.6.0 (Enterprise-Grade Audit Edition)  
+**Core Logic:** Professional Buy-side CIO Perspective  
+**Intelligence Base:** Alibaba Qwen-Max (DashScope Native)
 
 ---
 
-## 📖 Introduction / 简介
+## 💎 Project Vision / 项目愿景
+**OpenClaw** is not a simple price alert tool; it is a **Digital Investment Committee**. It transforms raw market noise into high-fidelity strategic intelligence by combining global real-time data with the reasoning depth of a Chief Investment Officer (CIO).
 
-This is an AI-driven, professional-grade market monitoring system designed for **"Chief Investment Officers" (CIOs)**. It tracks global multi-asset movements in real-time, providing deep logical attribution and strategic guidance rather than simple price alerts.
-
-这是一个基于 AI 驱动的“买方投资总监级”全球市场监控系统。它能够自动跟踪全球核心资产异动，并提供深度逻辑研判。系统不仅播报涨跌，更专注于分析宏观定价逻辑、多空博弈边际以及大级别趋势机会。
-
----
-
-## ✨ System Parameters / 系统参数说明
-
-### 1. Dynamic Thresholds / 分级预警阈值
-
-System logic adjusts sensitivity based on asset volatility profiles:
-系统根据资产属性自动切换预警灵敏度：
-
-* 🌐 **Macro (宏观锚点)**: **0.5%** *Covers DXY, US10Y, CNY/USD. High sensitivity to catch global liquidity shifts.* *(覆盖美元指数、美债收益率、人民币汇率。极高灵敏度捕捉流动性拐点。)*
-* 🌋 **Futures (期货/大宗)**: **1.5%** *Covers Gold, Crude Oil, Index Futures. Designed to catch trend start-up.* *(覆盖黄金、原油、股指期货。旨在捕捉趋势行情启动。)*
-* 🔔 **Stocks (股票异动)**: **3.0%** *Covers Global Equities. Filters out daily market noise.* *(覆盖全球个股。有效过滤日内杂波噪音。)*
-
-### 2. Monitoring Schedule / 运行调度 (UTC+8)
-
-Optimized for the 2,000-min free tier on GitHub Actions:
-针对 GitHub 每月 2,000 分钟免费额度优化的非对称调度：
-
-| Time Block (Beijing Time) | Frequency | Focus |
-| --- | --- | --- |
-| **09:30 - 16:00** | **Every 6 mins** | A-Shares & HK Market (火力全开) |
-| **16:00 - 24:00** | **Every 20 mins** | US Pre-market & Early Session (活跃时段) |
-| **00:00 - 09:30** | **2 Snapshots** | US Closing & Global Settlement (深夜静默) |
+**OpenClaw** 不仅仅是一个行情预警工具，它是一个**“数字投委会”**。它通过结合全球实时数据与投资总监（CIO）级别的推理深度，将杂乱的市场噪音转化为高保真的战略情报。
 
 ---
 
-## 🧠 Core Intelligence / 核心智能逻辑
+## 🚀 Key Functional Modules / 核心功能模块
 
-* **Batch & Chunking (分批汇总)**: Bundles up to 6 alerts into a single, beautifully formatted message to prevent notification fatigue. (每 6 条异动自动合并推送，拒绝信息轰炸。)
-* **Cooldown Mechanism (冷却机制)**: 1-hour "silence" per asset per level. Only level-ups (e.g., from 3% to 6%) can break the cooldown. (标的 1 小时冷却逻辑，防止临界点反复横跳。)
-* **Contextual Attribution (深度归因)**: AI distinguishes between Macro  (policy/rates) and Alpha  (earnings/news). (AI 自动拆解宏观系数  与个股超额收益 。)
+### 1. Dual-Phase Compulsory Global Audit / 双阶段强制全量审计
+* **Pre-Market Strategy (08:30 UTC+8):** A full-scale scan of global macro shifts, overnight US market impact, and domestic policy news to define the "Tone of the Day."  
+    **盘前策略 (08:30):** 全面扫描全球宏观位移、美股隔夜影响及国内政策要闻，为当日交易“定调”。
+* **Mid-Day Pivot Audit (12:45 UTC+8):** A deep dive into mid-day corporate filings, HK market sentiment, and A-share trend persistence before the afternoon session.  
+    **午后转折审计 (12:45):** 在下午开盘前，深度穿透午间公司公告、港股情绪及 A 股趋势的延续性。
 
----
+### 2. Multi-Asset Asymmetric Monitoring / 多资产非对称监控
+* **Dynamic Sensitivity:** * **Forex/Macro (±1%):** High-frequency tracking of USD/CNH and DXY to capture liquidity inflection points.  
+    * **Equities/Commodities (±3%):** Focused monitoring of A-shares, Global stocks, Gold, and Silver to filter out daily noise.  
+* **动态灵敏度:** * **外汇/宏观 (±1%):** 高频追踪人民币汇率与美元指数，捕捉流动性拐点。
+    * **权益/大宗 (±3%):** 聚焦 A 股、全球个股及贵金属，过滤日内无效波动。
 
-## 🛠️ Configuration / 配置指引
-
-### `data/watchlist.csv`
-
-Add symbols here. Use `=F` suffix for futures logic. (期货需带 `=F` 后缀)
-
-```csv
-symbol,name
-GC=F,黄金期货
-NQ=F,纳指100期货
-DX-Y.NYB,美元指数
-600519.SS,贵州茅台
-NVDA,英伟达
-
-```
-
-### GitHub Secrets
-
-* `DASHSCOPE_API_KEY`: Alibaba Qwen API (通义千问)
-* `BARK_URL`: Your private Bark Push URL (Bark 推送地址)
+### 3. "Shareholder Will" Deep Penetration / “股东意志”深度穿透
+* **Strategic Audit:** Mandatory scanning for movements of Top 5 shareholders and C-suite executives (Buybacks/Selling).  
+    **战略审计:** 强制扫描前五大股东及董监高的增减持动向。
+* **Intent Attribution:** Distinguishing between "Strategic Bearishness" (capital exit) and "Strategic Bullishness" (bottom-fishing) based on fundamental valuation.  
+    **意图定性:** 结合基本面估值，识别是“产业资本逃离”还是“战略性抄底”。
 
 ---
 
-## 📊 Notification Preview / 推送预览
+## 🛠️ Technical Framework Details / 技术框架细节
 
-> **📊 市场异动内参 (1/1)**
-> 🌐 **美元指数 +0.52%** (现价: 103.4)
-> **研判**：利率路径预期修正引发。强美元将压制黄金及成长股估值，关注晚间非农数据传导。
-> 🌋 **黄金期货 -1.20%** (现价: 2024.5)
-> **研判**：受美元走强及避险溢价回落压制。目前处于震荡下沿，关注 2010 支撑，不宜盲目追空。
+### 🏗️ System Architecture / 架构设计
+1.  **Scheduler (GitHub Actions):** Serverless cron-jobs optimized for off-peak execution to ensure 100% reliability in task triggering.  
+    **调度层:** 基于 GitHub Actions 的无服务器定时任务，针对高峰期进行了错峰优化，确保任务触发 100% 可靠。
+2.  **Data Engine (YahooQuery & Global Search):** Hybrid data retrieval combining structured price feeds with unstructured global financial news (English & Chinese).  
+    **数据引擎:** 混合数据获取模式，结合结构化行情流与非结构化全球财经资讯（中英文双语）。
+3.  **Reasoning Core (Alibaba Qwen-Max):** A 120-second deep-reasoning window for each asset, utilizing the 2026-optimized prompt engineering for buy-side analysis.  
+    **推理核心:** 为每个资产分配 120 秒的深度推理窗口，采用针对 2026 年买方逻辑优化的提示词工程。
+4.  **State Management (JSON Persistence):** Persistent state tracking to prevent "notification fatigue" and ensure alerts only fire on meaningful trend changes.  
+    **状态管理:** 持久化 JSON 状态追踪，防止“消息轰炸”，确保仅在趋势发生实质改变时推送。
+
+### 🧠 Logic Flow / 逻辑流
+`Trigger (Cron/Price) -> Data Aggregation -> Global News Search -> CIO Prompt Inference -> Multi-Dimensional Evaluation -> Feishu Delivery`  
+`触发 (定时/股价) -> 数据聚合 -> 全网资讯搜索 -> 总监提示词推理 -> 多维评价 -> 飞书交付`
+
+---
+
+## 📊 Evaluation Standards / 研判输出标准
+Every report delivered must meet the **"CIO Triple-Check"**:
+每一份交付的报告必须满足**“总监三项审计”**：
+1.  **Direction (方向):** Bullish/Bearish/Neutral. (看多/看空/中性)
+2.  **Magnitude (幅度):** Expected volatility scale (Pulse/Trend/Reversal). (预计波动级别：脉冲/趋势/反转)
+3.  **Persistence (持续性):** Short-term noise vs. Long-term structural change. (短期噪音 vs 长期结构性改变)
+
+---
+
+## 📋 Requirements & Setup / 配置要求
+* **Secrets:** `FEISHU_WEBHOOK`, `DASHSCOPE_API_KEY`.
+* **Data Source:** `data/watchlist.csv` (Supports `stock`, `forex` types).
+* **Runtime:** Python 3.10+ on GitHub Ubuntu Runner.
 
 ---
 
 ## ⚖️ Disclaimer / 免责声明
-
-**English:**
-This project is for research and educational purposes only. AI-generated insights are based on historical data and model inference, and do not constitute financial advice. Market investments involve risks. The author shall not be held responsible for any investment losses or decisions made based on this system.
-
-**中文:**
-本项目仅供科研与学习使用。AI 生成的内容基于历史数据与模型推理，不构成任何形式的投资建议或操作指南。市场有风险，投资需谨慎。作者不对使用本系统导致的任何投资损失承担责任，亦不对 AI 研判的准确性做出法律保证。
+This project is an AI-assisted research tool and does not constitute financial advice. The user is solely responsible for investment decisions.  
+本项目为 AI 辅助研究工具，不构成投资建议。用户需对投资决策承担全部责任。
