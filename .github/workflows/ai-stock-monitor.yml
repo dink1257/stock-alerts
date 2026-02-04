@@ -44,7 +44,7 @@ jobs:
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }} # 必须是百炼新 Key
           WATCHLIST_PATH: "data/watchlist.csv"
-        run: python -u main_scheduler.py
+        run: python debug_bridge.py
         
       - name: Sync Audit State
         # 即使报错也尝试保存状态，防止重复推送
