@@ -2,7 +2,7 @@
 
 ### 全球全资产 CIO 智能监控实验室
 
-**Version:** 4.0.0 (High-Efficiency Asymmetric Edition)
+**Version:** 6.6.0 (High-Efficiency Asymmetric Edition)
 
 **Core Engine:** Alibaba Qwen-Max/Plus (DashScope)
 
