@@ -1,57 +1,62 @@
-name: CIO Decision Hub (V6.0.0)
+name: CIO Decision Hub (V6.6.0)
 
+# 核心调度逻辑：确保早盘、午后强制全量审计及盘中异动监控
 on:
-  workflow_dispatch: # 支持手动一键启动测试
   schedule:
-    # 1. 盘前全量筛选（08:26）：所有标的一次性深度审计，锁定今日机会与风险
-    - cron: "26 0 * * 1-5" 
+    # 1. 北京时间 08:30 (UTC 00:30) - 早盘前一小时全量强制扫描
+    - cron: "30 0 * * 1-5"
     
-    # 2. 早盘异动监控（10:12 / 11:02）：精准捕捉开盘一小时后的逻辑确认
-    - cron: "12 2 * * 1-5"
-    - cron: "02 3 * * 1-5"
+    # 2. 北京时间 12:45 (UTC 04:45) - 下午开盘前强制扫描
+    - cron: "45 4 * * 1-5"
     
-    # 3. 午间逻辑梳理（12:42）：审计午间公告与港股联动
-    - cron: "42 4 * * 1-5"
-    
-    # 4. 尾盘策略锁定（14:38）：针对大股东异动，给出收盘博弈建议
-    - cron: "38 6 * * 1-5"
-    
-    # 5. 美股穿透审计（22:18）：扫描隔夜中概股及全球宏观映射
-    - cron: "18 14 * * 1-5"
+    # 3. 盘中异动关键点监控（北京时间 10:00, 11:00, 14:00, 15:00）
+    # 确保在强制扫描之外的时间点，依然保持对大幅异动的敏锐度
+    - cron: "0 2,3,6,7 * * 1-5"
 
+  # 支持手动触发，方便您随时进行链路测试
+  workflow_dispatch:
+
+# 权限配置：允许脚本更新 alert_state.json 以防止消息轰炸
 permissions:
   contents: write
   actions: write
 
 jobs:
-  monitor:
+  cio_audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 20 # 调高上限，为 Qwen-Max 的深度思考留足时间
+    # 设置 20 分钟超时，为 Qwen-Max 的深度联网审计预留充足时间
+    timeout-minutes: 20
+    
     steps:
-      - uses: actions/checkout@v3
-      
-      - name: Setup Python
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup Python 3.10
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
           cache: 'pip'
-          
-      - name: Install Dependencies
-        run: pip install requests pytz yahooquery
-        
-      - name: Execute CIO Audit
+
+      - name: Install Critical Dependencies
+        run: |
+          pip install requests pytz yahooquery
+
+      - name: Execute CIO Smart Audit
         env:
+          # 必须在 GitHub Repo Settings -> Secrets -> Actions 中配置以下变量
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
-          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }} # 必须是百炼新 Key
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }} # 阿里云百炼 sk- Key
           WATCHLIST_PATH: "data/watchlist.csv"
-        run: python debug_bridge.py
-        
+        # 运行主程序，V6.6.0 已内置强制推送时间窗逻辑
+        run: python -u main_scheduler.py
+
       - name: Sync Audit State
-        # 即使报错也尝试保存状态，防止重复推送
-        if: always() 
+        # 无论成功失败，都尝试保存最新的涨跌幅状态，避免重复推送
+        if: always()
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git pull --rebase origin main || true
           git add data/alert_state.json || true
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Update audit state [skip ci]" && git push)
+          # 仅当文件有变化时才提交，避免产生无效 Commit
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Update CIO audit state [skip ci]" && git push)
