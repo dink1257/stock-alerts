@@ -1,6 +1,5 @@
 import requests, os, csv, pytz, json
 from datetime import datetime, timedelta
-import yfinance as yf
 
 # --- 配置区 ---
 FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK")
@@ -18,9 +17,7 @@ def is_us_dst(now):
     return dst_start <= now < dst_end
 
 def ai_decision(symbol, name, industry, p_meta, news, m_context, is_forced):
-    """【完全还原：三段式严谨审计提示词】"""
-    print(f"🧠 正在执行总监级深度审计: {name}...")
-    
+    """【锁定：资深买方投资总监三段式提示词 - 严禁精简】"""
     prompt = f"""
 ### 角色定位
 你是一位资深买方投资总监。你的审计报告必须结构严谨，严禁偏差，拒绝空话。
@@ -51,89 +48,106 @@ def ai_decision(symbol, name, industry, p_meta, news, m_context, is_forced):
 {news}
 """
     headers = {"Authorization": f"Bearer {DASHSCOPE_API_KEY}", "Content-Type": "application/json"}
-    payload = {
-        "model": "qwen-max",
-        "input": {"messages": [{"role": "user", "content": prompt}]},
-        "parameters": {"result_format": "message", "temperature": 0.1}
-    }
+    payload = {"model": "qwen-max", "input": {"messages": [{"role": "user", "content": prompt}]}, "parameters": {"result_format": "message", "temperature": 0.1}}
     try:
-        res = requests.post("https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation", headers=headers, json=payload, timeout=90)
+        res = requests.post("https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation", headers=headers, json=payload, timeout=60)
         return res.json()['output']['choices'][0]['message']['content']
     except Exception as e:
-        return f"⚠️ AI 审计中断: {str(e)}"
+        return f"⚠️ AI 审计服务繁忙: {str(e)}"
+
+def get_batch_quotes(symbols):
+    """【高效获取方案】利用底层 API 批量抓取行情"""
+    if not symbols: return {}
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+    url = f"https://query1.finance.yahoo.com/v7/finance/quote?symbols={','.join(symbols)}"
+    try:
+        resp = requests.get(url, headers=headers, timeout=15)
+        data = resp.json()
+        result_list = data.get('quoteResponse', {}).get('result', [])
+        return {item['symbol']: item for item in result_list}
+    except Exception as e:
+        print(f"❌ 行情源直连失败: {e}")
+        return {}
 
 def main():
     bj_tz = pytz.timezone("Asia/Shanghai")
     now = datetime.now(bj_tz)
     h, m = now.hour, now.minute
-    print(f"🚀 财经监控cio版 启动 | 北京时间: {now.strftime('%H:%M:%S')}")
+    print(f"🚀 财经监控cio版 V8.5.0 | {now.strftime('%H:%M:%S')}")
     
-    # --- 1. 监控窗口自适应 ---
+    # 1. 窗口判定逻辑 (资源节省)
     is_dst = is_us_dst(now)
-    is_a_pre = (h == 8 and m >= 30) or (h == 9 and m < 30)
+    is_a_pre = (h == 8 and m >= 30) or (h == 9 and m <= 15)
     is_a_hk_trade = (h in [10, 11, 13, 14]) or (h == 9 and m >= 30) or (h == 15 and m <= 10)
     
-    # 动态适配美股开收盘
+    # 美股窗口动态适配
     if is_dst: 
-        is_us_win = (h == 21 and 0 <= m <= 40) or (h == 3 and 30 <= m <= 59)
+        is_us_active = (h == 21 and m >= 30) or h in [22, 23, 0, 1, 2, 3]
+        is_us_forced = (h == 21 and m <= 45) or (h == 4 and 0 <= m <= 15)
     else: 
-        is_us_win = (h == 22 and 0 <= m <= 40) or (h == 4 and 30 <= m <= 59)
+        is_us_active = (h == 22 and m >= 30) or h in [23, 0, 1, 2, 3, 4]
+        is_us_forced = (h == 22 and m <= 45) or (h == 5 and 0 <= m <= 15)
 
-    is_forced = is_a_pre or is_us_win
-    if not (is_forced or is_a_hk_trade):
-        print(f"💤 非交易/审计窗口 ({h:02}:{m:02})，秒退节省资源。")
+    is_forced = is_a_pre or (h == 12 and 45 <= m <= 59) or is_us_forced
+    
+    if not (is_forced or is_a_hk_trade or is_us_active):
+        print(f"💤 非监控时段 ({h:02}:{m:02})，系统进入静默。")
         return
 
-    # --- 2. 数据获取与审计 ---
+    # 2. 批量行情获取
     if not os.path.exists(WATCHLIST_PATH): return
     with open(WATCHLIST_PATH, 'r', encoding='utf-8') as f:
         stocks = list(csv.DictReader(f))
     
+    symbols = [s['symbol'] for s in stocks]
+    all_quotes = get_batch_quotes(symbols)
+    
+    # 大盘上下文获取
+    m_ctx_data = get_batch_quotes(["000001.SS", "^HSI", "^GSPC"])
+    m_ctx = " | ".join([f"{k}: {v.get('regularMarketPrice','N/A')}({v.get('regularMarketChangePercent',0):+.2f}%)" for k, v in m_ctx_data.items()])
+
     try:
         with open(STATE_PATH, 'r') as f: state = json.load(f)
     except: state = {"last_triggered_pct": {}}
 
-    # 获取指数锚点
-    m_ctx = "获取中..."
-    try:
-        idx = yf.Tickers("000001.SS ^HSI ^GSPC")
-        m_ctx = " | ".join([f"{k}: {v.fast_info.last_price:.2f}" for k,v in idx.tickers.items()])
-    except: pass
-
+    # 3. 审计循环
     for s in stocks:
         symbol, name, industry = s['symbol'], s['name'], s['industry']
+        q = all_quotes.get(symbol)
+        if not q: continue
+        
         try:
-            ticker = yf.Ticker(symbol)
-            info = ticker.fast_info
-            curr, prev = info.last_price, info.previous_close
-            if not curr or not prev: continue
+            curr = q.get('regularMarketPrice')
+            prev = q.get('regularMarketPreviousClose')
+            if curr is None or prev is None: continue
             
             pct = (curr - prev) / prev * 100
             last_p = state["last_triggered_pct"].get(symbol)
             
-            # 触发判定
+            # 异动判定逻辑
             should_audit = is_forced or (last_p is None and abs(pct) >= 3.0) or (last_p and abs(pct) >= abs(last_p)*2)
             
             if should_audit:
-                # 关键词注入行业标签以强化基本面审计
-                search_q = f"{name} {symbol} {industry} 股东 政策 公告"
-                news_r = requests.get(f"https://query1.finance.yahoo.com/v1/finance/search?q={search_q}&newsCount=10").json()
+                print(f"✅ 审计中: {name} ({pct:+.2f}%)")
+                # 强化资讯获取关键词
+                search_q = f"{name} {symbol} {industry} 股东 政策"
+                news_r = requests.get(f"https://query1.finance.yahoo.com/v1/finance/search?q={search_q}&newsCount=6", timeout=10).json()
                 news_text = " | ".join([n.get('title','') for n in news_r.get('news', [])])
                 
                 content = ai_decision(symbol, name, industry, {"pct":pct}, news_text, m_ctx, is_forced)
                 
-                # 飞书卡片推送
+                # 飞书推送
                 requests.post(FEISHU_WEBHOOK, json={
                     "msg_type": "interactive",
                     "card": {
                         "header": {"title": {"tag": "plain_text", "content": f"【CIO审计】{name} ({pct:+.2f}%)"}, "template": "orange" if is_forced else "blue"},
-                        "elements": [{"tag": "markdown", "content": f"**[原因]**: {'⏰ 定时全量' if is_forced else '🌋 异动触发'}\n**[标签]**: {industry}\n---\n{content}"}]
+                        "elements": [{"tag": "markdown", "content": f"**[触发原因]**: {'⏰ 定时扫描' if is_forced else '🌋 异动触发'}\n**[所属标签]**: {industry}\n---\n{content}"}]
                     }
-                })
+                }, timeout=10)
                 state["last_triggered_pct"][symbol] = pct
         except: continue
 
     with open(STATE_PATH, 'w') as f: json.dump(state, f)
-    print("🏁 审计任务完成")
+    print("🏁 任务全部结束")
 
 if __name__ == "__main__": main()
