@@ -1,22 +1,24 @@
-name: CIO Decision Hub (V6.6.0)
+name: CIO Decision Hub (V6.8.5)
 
-# 核心调度逻辑：确保早盘、午后强制全量审计及盘中异动监控
+# 核心调度策略：
+# 1. 强制全量审计：08:30 (盘前定调) & 12:45 (盘中修正)
+# 2. 阶梯异动监测：交易时段每 10 分钟扫描，无异动/未翻倍则略过
 on:
   schedule:
-    # 1. 北京时间 08:30 (UTC 00:30) - 早盘前一小时全量强制扫描
+    # A. 北京时间 08:30 (UTC 00:30) - 早盘全量强制审计
     - cron: "30 0 * * 1-5"
     
-    # 2. 北京时间 12:45 (UTC 04:45) - 下午开盘前强制扫描
+    # B. 北京时间 09:30 - 11:40 (UTC 01:30 - 03:40) - 盘中高频监测
+    - cron: "*/10 1-3 * * 1-5"
+    
+    # C. 北京时间 12:45 (UTC 04:45) - 午间强制全量审计
     - cron: "45 4 * * 1-5"
     
-    # 3. 盘中异动关键点监控（北京时间 10:00, 11:00, 14:00, 15:00）
-    # 确保在强制扫描之外的时间点，依然保持对大幅异动的敏锐度
-    - cron: "0 2,3,6,7 * * 1-5"
+    # D. 北京时间 13:00 - 15:10 (UTC 05:00 - 07:10) - 盘中高频监测
+    - cron: "*/10 5-7 * * 1-5"
 
-  # 支持手动触发，方便您随时进行链路测试
-  workflow_dispatch:
+  workflow_dispatch: # 保留手动触发用于验证
 
-# 权限配置：允许脚本更新 alert_state.json 以防止消息轰炸
 permissions:
   contents: write
   actions: write
@@ -24,8 +26,7 @@ permissions:
 jobs:
   cio_audit:
     runs-on: ubuntu-latest
-    # 设置 20 分钟超时，为 Qwen-Max 的深度联网审计预留充足时间
-    timeout-minutes: 20
+    timeout-minutes: 15
     
     steps:
       - name: Checkout Code
@@ -38,25 +39,22 @@ jobs:
           cache: 'pip'
 
       - name: Install Critical Dependencies
-        run: |
-          pip install requests pytz yahooquery
+        run: pip install requests pytz yahooquery
 
       - name: Execute CIO Smart Audit
         env:
-          # 必须在 GitHub Repo Settings -> Secrets -> Actions 中配置以下变量
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
-          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }} # 阿里云百炼 sk- Key
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
           WATCHLIST_PATH: "data/watchlist.csv"
-        # 运行主程序，V6.6.0 已内置强制推送时间窗逻辑
+        # -u 确保日志实时输出，方便在 Actions 页面查阅“静默”日志
         run: python -u main_scheduler.py
 
       - name: Sync Audit State
-        # 无论成功失败，都尝试保存最新的涨跌幅状态，避免重复推送
         if: always()
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git pull --rebase origin main || true
           git add data/alert_state.json || true
-          # 仅当文件有变化时才提交，避免产生无效 Commit
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Update CIO audit state [skip ci]" && git push)
+          # 仅在阶梯触发导致状态更新时才提交代码，避免污染提交历史
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Update CIO state [skip ci]" && git push)
