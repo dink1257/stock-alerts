@@ -1,6 +1,6 @@
 import requests, os, csv, pytz, json
-from datetime import datetime
-from yahooquery import Ticker
+from datetime import datetime, timedelta
+import yfinance as yf
 
 # --- 配置区 ---
 FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK")
@@ -8,49 +8,47 @@ DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY")
 WATCHLIST_PATH = "data/watchlist.csv"
 STATE_PATH = "data/alert_state.json"
 
-def get_market_context():
-    """获取大盘数据，作为全局审计锚点"""
-    print("🌐 正在抓取指数行情 (SH000001 / ^HSI)...")
-    try:
-        tickers = Ticker("000001.SS ^HSI")
-        data = tickers.price
-        sh = data.get('000001.SS', {})
-        hs = data.get('^HSI', {})
-        
-        sh_p = sh.get('regularMarketPrice', "N/A")
-        sh_pct = sh.get('regularMarketChangePercent', 0) * 100
-        hs_p = hs.get('regularMarketPrice', "N/A")
-        hs_pct = hs.get('regularMarketChangePercent', 0) * 100
-        
-        ctx = f"上证: {sh_p} ({sh_pct:+.2f}%); 恒生: {hs_p} ({hs_pct:+.2f}%)"
-        print(f"✅ 大盘快照: {ctx}")
-        return ctx
-    except Exception as e:
-        print(f"⚠️ 大盘抓取提示: {e}")
-        return "指数行情暂时离线，根据个股独立逻辑研判。"
+def is_us_dst(now):
+    """自动判定美股夏令时 (3月第二个周日至11月第一个周日)"""
+    year = now.year
+    dst_start = datetime(year, 3, 8, 2, tzinfo=now.tzinfo)
+    dst_start += timedelta(days=(6 - dst_start.weekday()) % 7 + 7)
+    dst_end = datetime(year, 11, 1, 2, tzinfo=now.tzinfo)
+    dst_end += timedelta(days=(6 - dst_end.weekday()) % 7)
+    return dst_start <= now < dst_end
 
-def ai_decision(symbol, name, p_meta, news, m_context, is_forced):
-    """总监级 AI 决策引擎"""
-    print(f"🧠 正在调用 Qwen-Max 对 {name} 进行深度审计...")
+def ai_decision(symbol, name, industry, p_meta, news, m_context, is_forced):
+    """【完全还原：三段式严谨审计提示词】"""
+    print(f"🧠 正在执行总监级深度审计: {name}...")
+    
     prompt = f"""
 ### 角色定位
-你是一位资深买方投资总监。你的审计报告必须结构严谨，严禁偏差。
+你是一位资深买方投资总监。你的审计报告必须结构严谨，严禁偏差，拒绝空话。
 
 ### 核心审计数据
-- 宏观盘面：{m_context}
-- 目标标的：{name} ({symbol}) | 实时波动：{p_meta['pct']:+.2f}%
-- 模式：{'【定时全量审计】' if is_forced else '【异动触发】'}
+- 宏观盘面参考：{m_context}
+- 异动目标标的：{name} ({symbol}) | 实时波动：{p_meta['pct']:+.2f}%
+- 模式：{'【定时强制扫描】' if is_forced else '【实时异动审计】'}
 
-### 严格审计指令
-1. **【盘面情况审计】**：点评上证/恒指走势及成交量，定性市场情绪。
-2. **【品种归因审计】**：
-   - 股权审计：前五大股东、董监高增减持/质押等。无信息则略过。
-   - 基本面审计：个股经营订单、基本面及财报预期。无信息则略过。
-   - 逻辑隔离：判断是跟随大盘(Beta)还是个股独立逻辑(Alpha)。
-3. **【操作建议】**：买入/卖出/持仓。明确方向、幅度及持续性。
+### 严格审计指令（三段式）
+
+1. **【盘面情况审计】**：
+   - 必须点评上证指数/恒生指数走势。
+   - 审计成交量（对比前五日均值）判断是放量还是缩量，定性市场情绪。
+
+2. **【品种归因审计】**（核心）：
+   - 仅针对标的 {name} ({symbol}) 本次 {p_meta['pct']:+.2f}% 的波动进行归因。
+   - **股权审计**：审计前五大股东、董监高近期是否有增减持、质押、冻结等意志体现。若无明确信息，此项直接略过。
+   - **基本面审计**：审计该品种行业政策变动（参考标签：{industry}）、供求关系、个股经营订单及财报预期。若无明确信息，此项直接略过。
+   - **定性分析**：判断本次波动是跟随大盘(Beta)还是独立的个股逻辑(Alpha)。
+
+3. **【操作建议】**：
+   - 给出明确的【买入/卖出/持仓】建议。
+   - 明确指出波动的方向、幅度预判及持续性。
 
 ---
-[资讯输入]：{news}
+[实时情报输入]：
+{news}
 """
     headers = {"Authorization": f"Bearer {DASHSCOPE_API_KEY}", "Content-Type": "application/json"}
     payload = {
@@ -59,104 +57,83 @@ def ai_decision(symbol, name, p_meta, news, m_context, is_forced):
         "parameters": {"result_format": "message", "temperature": 0.1}
     }
     try:
-        res = requests.post("https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation", headers=headers, json=payload, timeout=120)
-        res_data = res.json()
-        content = res_data['output']['choices'][0]['message']['content']
-        tokens = res_data.get('usage', {}).get('total_tokens', 0)
-        return content + f"\n\n---\n💰 **[成本审计]**：消耗 {tokens} Tokens (约 ¥{(tokens/1000)*0.12:.4f})"
+        res = requests.post("https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation", headers=headers, json=payload, timeout=90)
+        return res.json()['output']['choices'][0]['message']['content']
     except Exception as e:
-        print(f"❌ AI 接口异常: {e}")
-        return f"⚠️ 研判异常: {str(e)}"
+        return f"⚠️ AI 审计中断: {str(e)}"
 
 def main():
     bj_tz = pytz.timezone("Asia/Shanghai")
     now = datetime.now(bj_tz)
-    print(f"🚀 系统启动 | 北京时间: {now.strftime('%Y-%m-%d %H:%M:%S')}")
+    h, m = now.hour, now.minute
+    print(f"🚀 财经监控cio版 启动 | 北京时间: {now.strftime('%H:%M:%S')}")
     
-    # 强制扫描模式判定 (08:30 & 12:45)
-    is_forced = (now.hour == 8 and 25 <= now.minute <= 59) or (now.hour == 9 and 0 <= now.minute <= 15) or \
-                (now.hour == 12 and 40 <= now.minute <= 59) or (now.hour == 13 and 0 <= now.minute <= 15)
-    print(f"📢 当前运行模式: {'强制全量推送' if is_forced else '异动阶梯监控'}")
+    # --- 1. 监控窗口自适应 ---
+    is_dst = is_us_dst(now)
+    is_a_pre = (h == 8 and m >= 30) or (h == 9 and m < 30)
+    is_a_hk_trade = (h in [10, 11, 13, 14]) or (h == 9 and m >= 30) or (h == 15 and m <= 10)
+    
+    # 动态适配美股开收盘
+    if is_dst: 
+        is_us_win = (h == 21 and 0 <= m <= 40) or (h == 3 and 30 <= m <= 59)
+    else: 
+        is_us_win = (h == 22 and 0 <= m <= 40) or (h == 4 and 30 <= m <= 59)
 
-    m_context = get_market_context()
-
-    if not os.path.exists(WATCHLIST_PATH):
-        print(f"❌ 错误: 找不到文件 {WATCHLIST_PATH}")
+    is_forced = is_a_pre or is_us_win
+    if not (is_forced or is_a_hk_trade):
+        print(f"💤 非交易/审计窗口 ({h:02}:{m:02})，秒退节省资源。")
         return
-        
+
+    # --- 2. 数据获取与审计 ---
+    if not os.path.exists(WATCHLIST_PATH): return
     with open(WATCHLIST_PATH, 'r', encoding='utf-8') as f:
         stocks = list(csv.DictReader(f))
     
     try:
         with open(STATE_PATH, 'r') as f: state = json.load(f)
-    except: 
-        print("💡 初始运行，创建状态追踪文件")
-        state = {"last_triggered_pct": {}}
+    except: state = {"last_triggered_pct": {}}
+
+    # 获取指数锚点
+    m_ctx = "获取中..."
+    try:
+        idx = yf.Tickers("000001.SS ^HSI ^GSPC")
+        m_ctx = " | ".join([f"{k}: {v.fast_info.last_price:.2f}" for k,v in idx.tickers.items()])
+    except: pass
 
     for s in stocks:
-        symbol, name = s['symbol'], s['name']
-        m_type = s.get('type', 'stock')
-        print(f"🔎 扫描标的: {name} ({symbol})")
-        
+        symbol, name, industry = s['symbol'], s['name'], s['industry']
         try:
-            tk = Ticker(symbol)
-            p_info = tk.price.get(symbol, {})
-            curr = p_info.get('regularMarketPrice')
-            prev = p_info.get('regularMarketPreviousClose')
+            ticker = yf.Ticker(symbol)
+            info = ticker.fast_info
+            curr, prev = info.last_price, info.previous_close
+            if not curr or not prev: continue
             
-            if curr is None or prev is None:
-                print(f"   ⚠️ 价格抓取失败，跳过")
-                continue
-                
             pct = (curr - prev) / prev * 100
-            base_threshold = 1.0 if m_type == 'forex' else 3.0
             last_p = state["last_triggered_pct"].get(symbol)
             
-            should_audit = False
-            reason = ""
-
-            if is_forced:
-                should_audit = True
-                reason = "⏰ 定时强制全量审计"
-            elif last_p is None:
-                if abs(pct) >= base_threshold:
-                    should_audit = True
-                    reason = f"🌋 首次异动达标 ({pct:+.2f}%)"
-            else:
-                # 阶梯翻倍逻辑：只有当前波动达到上次触发值的两倍才推送
-                if abs(pct) >= abs(last_p) * 2:
-                    should_audit = True
-                    reason = f"🚀 波动翻倍审计 ({last_p:+.2f}% -> {pct:+.2f}%)"
-
+            # 触发判定
+            should_audit = is_forced or (last_p is None and abs(pct) >= 3.0) or (last_p and abs(pct) >= abs(last_p)*2)
+            
             if should_audit:
-                print(f"   ✅ 触发审计! 原因: {reason}")
-                # 全网搜寻
-                search_url = f"https://query1.finance.yahoo.com/v1/finance/search?q={name} {symbol} 股东 订单 研报&newsCount=8"
-                news_r = requests.get(search_url).json()
+                # 关键词注入行业标签以强化基本面审计
+                search_q = f"{name} {symbol} {industry} 股东 政策 公告"
+                news_r = requests.get(f"https://query1.finance.yahoo.com/v1/finance/search?q={search_q}&newsCount=10").json()
                 news_text = " | ".join([n.get('title','') for n in news_r.get('news', [])])
                 
-                analysis = ai_decision(symbol, name, {"pct":pct}, news_text, m_context, is_forced)
+                content = ai_decision(symbol, name, industry, {"pct":pct}, news_text, m_ctx, is_forced)
                 
-                # 发送飞书
-                card = {
+                # 飞书卡片推送
+                requests.post(FEISHU_WEBHOOK, json={
                     "msg_type": "interactive",
                     "card": {
                         "header": {"title": {"tag": "plain_text", "content": f"【CIO审计】{name} ({pct:+.2f}%)"}, "template": "orange" if is_forced else "blue"},
-                        "elements": [{"tag": "markdown", "content": f"**[触发原因]**: {reason}\n---\n{analysis}"}]
+                        "elements": [{"tag": "markdown", "content": f"**[原因]**: {'⏰ 定时全量' if is_forced else '🌋 异动触发'}\n**[标签]**: {industry}\n---\n{content}"}]
                     }
-                }
-                requests.post(FEISHU_WEBHOOK, json=card, timeout=15)
+                })
                 state["last_triggered_pct"][symbol] = pct
-            else:
-                print(f"   💤 保持静默 (当前 {pct:+.2f}%, 上次触发 {last_p if last_p else 0:+.2f}%)")
-                
-        except Exception as e:
-            print(f"   ❌ 处理异常: {e}")
-            continue
+        except: continue
 
-    with open(STATE_PATH, 'w') as f:
-        json.dump(state, f)
-    print(f"🏁 审计任务全部完成 | {datetime.now(bj_tz).strftime('%H:%M:%S')}")
+    with open(STATE_PATH, 'w') as f: json.dump(state, f)
+    print("🏁 审计任务完成")
 
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__": main()
