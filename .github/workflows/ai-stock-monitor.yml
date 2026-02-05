@@ -30,7 +30,8 @@ jobs:
           cache: 'pip'
 
       - name: Install Dependencies
-        run: pip install requests pytz yfinance
+        run: |
+          pip install requests pytz  # 仅保留这两个核心库
 
       - name: Execute CIO Smart Audit
         env:
