@@ -39,7 +39,7 @@ jobs:
           cache: 'pip'
 
       - name: Install Critical Dependencies
-        run: pip install requests pytz yahooquery
+        run: pip install -r requirements.txt
 
       - name: Execute CIO Smart Audit
         env:
