@@ -18,3 +18,12 @@
 ## [V7.0.0 - V8.0.0] - 2026-01
 - 核心架构从原有 OpenClaw 逻辑迁移至 GitHub Actions 自动化平台。
 - 引入飞书卡片式推送展示。
+
+## [V8.6.0] - 2026-10-19
+### 🔧 故障修复（此前一直运行失败的根因）
+- **行情接口 401**：Yahoo v7 quote 批量接口已下线，改用 v8 chart 单接口 + 线程池并发（10 并发，70+ 标的约 10 秒），无额外依赖。
+- **整轮静默跳过**：旧版 `alert_state.json` 用的是 `last_pct` 字段，新代码读 `last_triggered_pct` 报 KeyError，被 `except: continue` 吞掉导致所有标的被跳过。现自动兼容迁移。
+- **夏令时判定错误**：3 月第二个周日的计算多加了 7 天（如 2026 年会误判 3 月 8 日为非夏令时），已修正。
+- **异常不再静默**：各环节异常均打印日志；`FEISHU_WEBHOOK`/`DASHSCOPE_API_KEY` 未配置时给出明确提示而非崩溃。
+- **Actions 升级**：`checkout@v3`→`v4`、`setup-python@v4`→`v5`（旧版 Node16 已被 GitHub 弃用）；state 同步前先 rebase，减少并发 push 冲突。
+- **中文搜索编码**：资讯搜索改用 `params` 传参，避免中文关键词拼接 URL 出错。
